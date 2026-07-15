@@ -18,5 +18,5 @@ def get_pages_handler():
     return {"message":"pages"}
 
 @app.get("/page/{id}")
-def get_page_handler():
-    return {"message":"page"}
+def get_page_handler(id:int):
+    return {"message":"id"}
