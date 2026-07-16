@@ -16,4 +16,4 @@ class PostCreate(ContentCreate):
     image: str
 
 class CommentCreate(ContentCreate):
-    post_id: int
+    pass   # nickname, contents만. post_id는 URL에서 받음
