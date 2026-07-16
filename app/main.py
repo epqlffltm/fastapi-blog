@@ -8,7 +8,7 @@ main.py작성
 get api 전체 조회
 get api 단일 조회
 post api 생성
-patch api 수정
+patch api 작성
 '''
 
 from fastapi import FastAPI, Body
