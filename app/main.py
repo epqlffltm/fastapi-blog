@@ -23,12 +23,27 @@ async def index():
 @app.get("/pages")
 def get_pages_handler(order: str = "random"):
     order = order.lower()
-    result = list(fake_posts.values())
+
+    result = []
+    for post in fake_posts.values():
+        comment_count = 0
+        for c in fake_comments.values():
+            if c["post_id"] == post["id"]:
+                comment_count += 1
+
+        result.append({
+            "id": post["id"],
+            "title": post["title"],
+            "nickname": post["nickname"],
+            "created_at": post["created_at"],
+            "comment_count": comment_count,
+        })
+
     if order == "asc":
         return result
     elif order == "desc":
         return result[::-1]
-    else:  # "random" 포함, 그 외 아무 값
+    else:
         random.shuffle(result)
         return result
 
