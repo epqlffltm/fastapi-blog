@@ -9,12 +9,12 @@ get api 전체 조회
 get api 단일 조회
 post api 생성
 patch api 작성
+delete api 작성
 '''
 
 from fastapi import FastAPI, Body
 from datetime import datetime, timezone
 import random
-#from pydantic import BaseModel
 from .database.fake_posts import fake_posts
 from .database.fake_comments import fake_comments
 from .schemas import PostCreate, CommentCreate
@@ -83,19 +83,19 @@ def create_post_handler(request: PostCreate):
         "title": request.title,
         "nickname": request.nickname,
         "contents": request.contents,
-        "image": request.image,
+        "image": request.image,     # 이제 리스트를 그대로 저장
         "is_deleted": False,# 서버가 강제
     }
     return fake_posts[new_id]
 
-@app.post("/page/{id}")#댓글 쓰기
-def create_comment_handler(id: int, request: CommentCreate):
+@app.post("/page/{post_id}/comment")#댓글 쓰기
+def create_comment_handler(post_id: int, request: CommentCreate):
     new_id = max(fake_comments.keys()) + 1   # 댓글 고유 id 발급
     now = datetime.now(timezone.utc).isoformat()
 
     fake_comments[new_id] = {
         "id": new_id,
-        "post_id": id,          # URL의 id = 어느 글에 다는지
+        "post_id": post_id,     # URL의 post_id = 어느 글에 다는지
         "created_at": now,
         "updated_at": now,
         "nickname": request.nickname,
@@ -131,3 +131,19 @@ def update_comment_handler(
         comment["updated_at"] = datetime.now(timezone.utc).isoformat()
         return comment
     return {}
+
+@app.delete("/page/{id}")#본문 삭제
+def delete_post_handler(id: int):
+    post = fake_posts.get(id)
+    if post:
+        post["is_deleted"] = True
+        post["updated_at"] = datetime.now(timezone.utc).isoformat()
+    return
+
+@app.delete("/comment/{id}")#댓글 삭제
+def delete_comment_handler(id: int):
+    comment = fake_comments.get(id)
+    if comment:
+        comment["is_deleted"] = True
+        comment["updated_at"] = datetime.now(timezone.utc).isoformat()
+    return

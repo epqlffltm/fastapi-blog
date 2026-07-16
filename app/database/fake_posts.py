@@ -3,6 +3,7 @@
 '''
 2026-07-16
 테스트용 posts db
+이미지 필드 리스트로 변경
 '''
 
 fake_posts = {
@@ -13,7 +14,7 @@ fake_posts = {
         "title":"dnd 밈1",
         "nickname":"hong",
         "contents":"새로온 파티원이 로그일때 로그의 말은 '나로는 부족해?'",
-        "image":"",
+        "image":[],
         "is_deleted":False,
     },
     2:{
@@ -23,7 +24,7 @@ fake_posts = {
         "title":"dnd 밈2",
         "nickname":"gil",
         "contents":"새로온 파티원이 바바리안일때 바바리안 왈 '바바리안, 뭉치면 강하다'",
-        "image":"",
+        "image":[],
         "is_deleted":False,
     },
     3:{
@@ -33,7 +34,7 @@ fake_posts = {
         "title":"dnd 밈3",
         "nickname":"dong",
         "contents":"둥그런 선술집을 지으세요",
-        "image":"",
+        "image":[],
         "is_deleted":False,
     }
 }
