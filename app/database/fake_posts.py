@@ -1,14 +1,11 @@
-#app/database/fake_db.py
+#app/database/fake_posts.py
 
 '''
 2026-07-16
-테스트용 db 작성
-comment 객체화
-날자 추가
-사용 정지
+테스트용 posts db
 '''
 
-fake_db = {
+fake_posts = {
     1:{
         "id":1,
         "created_at":"2026-07-16T09:00:00+00:00",
@@ -17,10 +14,6 @@ fake_db = {
         "nickname":"hong",
         "contents":"새로온 파티원이 로그일때 로그의 말은 '나로는 부족해?'",
         "image":"",
-        "comment":[
-            {"id":1, "nickname":"kim", "contents":"응, 로그 실력이 부족해", "is_deleted":False},
-            {"id":2, "nickname":"lee", "contents":"로그 수는 부족하진 않아", "is_deleted":False},
-        ],
         "is_deleted":False,
     },
     2:{
@@ -31,11 +24,6 @@ fake_db = {
         "nickname":"gil",
         "contents":"새로온 파티원이 바바리안일때 바바리안 왈 '바바리안, 뭉치면 강하다'",
         "image":"",
-        "comment":[
-            {"id":1, "nickname":"park", "contents":"바바리안, 계획이 있다", "is_deleted":False},
-            {"id":2, "nickname":"choi", "contents":"바바리안, 계획은 도끼질이다", "is_deleted":False},
-            {"id":3, "nickname":"jung", "contents":"바바리안, 찢고 죽인다", "is_deleted":False},
-        ],
         "is_deleted":False,
     },
     3:{
@@ -46,9 +34,6 @@ fake_db = {
         "nickname":"dong",
         "contents":"둥그런 선술집을 지으세요",
         "image":"",
-        "comment":[
-            {"id":1, "nickname":"yoon", "contents":"로그가 구석에서 비릿한 웃음을 짓지 못하도록", "is_deleted":False},
-        ],
         "is_deleted":False,
     }
 }
