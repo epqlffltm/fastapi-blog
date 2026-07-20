@@ -17,6 +17,7 @@ delete api 작성
 2026-07-20
 get 전체조회 api
 orm → http response 스키마
+get 단일 조회 api
 '''
 
 from fastapi import FastAPI, Body, HTTPException,Depends
@@ -25,7 +26,7 @@ import random
 from .database.fake_posts import fake_posts
 from .database.fake_comments import fake_comments
 from .schemas import PostCreate, CommentCreate
-from .schema.response import ListPostSchema, PostListItemSchema
+from .schema.response import ListPostSchema, PostListItemSchema,PostDetailSchema
 from typing import Optional
 from sqlalchemy.orm import Session
 from .database.connection import get_db
@@ -78,18 +79,21 @@ def get_pages_handler(
 
     return ListPostSchema(posts=result)
 
-@app.get("/page/{id}", status_code=200)#글 읽기
-def get_page_handler(id: int):
-    post = fake_posts.get(id)
-    if post is None or post["is_deleted"]:      # 없거나 삭제된 글
+@app.get("/page/{id}", status_code=200, response_model=PostDetailSchema)#글 읽기
+def get_page_handler(
+    id: int,
+    session: Session = Depends(get_db),
+):
+    post = session.scalar(
+        select(Post).where(Post.id == id).where(Post.is_deleted == False)
+    )
+    if post is None:      # 없거나 삭제된 글
         raise HTTPException(status_code=404, detail="post not found")
 
-    comments = []
-    for c in fake_comments.values():
-        if c["post_id"] == id and not c["is_deleted"]:
-            comments.append(c)
+    # 삭제 안 된 댓글만 남기기 (relationship은 삭제 여부를 안 가리므로 직접 필터)
+    post.comments = [c for c in post.comments if not c.is_deleted]
 
-    return {**post, "comments": comments}
+    return post
 
 @app.post("/page", status_code=201)#본문 쓰기
 def create_post_handler(request: PostCreate):
