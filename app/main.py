@@ -13,15 +13,22 @@ delete api 작성
 
 2026-07-17
 404 예외 처리 추가
+
+2026-07-20
+get 전체조회 api
 '''
 
-from fastapi import FastAPI, Body, HTTPException
+from fastapi import FastAPI, Body, HTTPException,Depends
 from datetime import datetime, timezone
 import random
 from .database.fake_posts import fake_posts
 from .database.fake_comments import fake_comments
 from .schemas import PostCreate, CommentCreate
 from typing import Optional
+from sqlalchemy.orm import Session
+from .database.connection import get_db
+from sqlalchemy import select, func
+from .database.orm import Post, Comment
 
 app = FastAPI()
 
@@ -31,33 +38,39 @@ async def index():
 
 
 @app.get("/pages", status_code=200)#글 목록 보기
-def get_pages_handler(order: str = "random"):
+def get_pages_handler(
+    order: str = "random",
+    session: Session = Depends(get_db),
+):
     order = order.lower()
 
-    result = []
-    for post in fake_posts.values():
-        if post["is_deleted"]:          # 삭제된 글은 목록에서 제외
-            continue
+    # 삭제 안 된 글 가져오기 + 정렬을 DB가 함
+    stmt = select(Post).where(Post.is_deleted == False)
+    if order == "asc":
+        stmt = stmt.order_by(Post.created_at.asc())
+    elif order == "desc":
+        stmt = stmt.order_by(Post.created_at.desc())
+    else:
+        stmt = stmt.order_by(func.random())
 
-        comment_count = 0
-        for c in fake_comments.values():
-            if c["post_id"] == post["id"] and not c["is_deleted"]:
-                comment_count += 1
+    posts = session.scalars(stmt).all()
+
+    result = []
+    for post in posts:
+        # 이 글의 삭제 안 된 댓글 수 세기 (COUNT를 DB가 함)
+        comment_count = session.scalar(
+            select(func.count(Comment.id))
+            .where(Comment.post_id == post.id)
+            .where(Comment.is_deleted == False)
+        )
 
         result.append({
-            "id": post["id"],
-            "title": post["title"],
-            "nickname": post["nickname"],
-            "created_at": post["created_at"],
+            "id": post.id,
+            "title": post.title,
+            "nickname": post.nickname,
+            "created_at": post.created_at,
             "comment_count": comment_count,
         })
-
-    if order == "asc":
-        result.sort(key=lambda x: x["created_at"])
-    elif order == "desc":
-        result.sort(key=lambda x: x["created_at"], reverse=True)
-    else:
-        random.shuffle(result)
 
     return result
 
