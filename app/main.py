@@ -16,6 +16,7 @@ delete api 작성
 
 2026-07-20
 get 전체조회 api
+orm → http response 스키마
 '''
 
 from fastapi import FastAPI, Body, HTTPException,Depends
@@ -24,6 +25,7 @@ import random
 from .database.fake_posts import fake_posts
 from .database.fake_comments import fake_comments
 from .schemas import PostCreate, CommentCreate
+from .schema.response import ListPostSchema, PostListItemSchema
 from typing import Optional
 from sqlalchemy.orm import Session
 from .database.connection import get_db
@@ -37,7 +39,7 @@ async def index():
     return {"message": "Hello, FastAPI"}
 
 
-@app.get("/pages", status_code=200)#글 목록 보기
+@app.get("/pages", status_code=200, response_model=ListPostSchema)#글 목록 보기
 def get_pages_handler(
     order: str = "random",
     session: Session = Depends(get_db),
@@ -64,15 +66,17 @@ def get_pages_handler(
             .where(Comment.is_deleted == False)
         )
 
-        result.append({
-            "id": post.id,
-            "title": post.title,
-            "nickname": post.nickname,
-            "created_at": post.created_at,
-            "comment_count": comment_count,
-        })
+        result.append(
+            PostListItemSchema(
+                id=post.id,
+                title=post.title,
+                nickname=post.nickname,
+                created_at=post.created_at,
+                comment_count=comment_count,
+            )
+        )
 
-    return result
+    return ListPostSchema(posts=result)
 
 @app.get("/page/{id}", status_code=200)#글 읽기
 def get_page_handler(id: int):

@@ -18,7 +18,7 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
-engine = create_engine(settings.database_url, echo=False)
+engine = create_engine(settings.database_url, echo=True)
 SessionFactory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 class Base(DeclarativeBase):
