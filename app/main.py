@@ -18,6 +18,7 @@ delete api 작성
 get 전체조회 api
 orm → http response 스키마
 get 단일 조회 api
+refactoring
 '''
 
 from fastapi import FastAPI, Body, HTTPException,Depends
@@ -25,7 +26,8 @@ from datetime import datetime, timezone
 import random
 from .database.fake_posts import fake_posts
 from .database.fake_comments import fake_comments
-from .schemas import PostCreate, CommentCreate
+#from .schemas import PostCreate, CommentCreate
+from .schema.request import PostCreate, CommentCreate
 from .schema.response import ListPostSchema, PostListItemSchema,PostDetailSchema
 from typing import Optional
 from sqlalchemy.orm import Session
