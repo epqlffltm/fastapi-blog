@@ -1,8 +1,8 @@
-#app/database.py
+#app/database/connection.py
 
 '''
 2026-07-20
-DB 연결 설정
+db연결
 '''
 
 from sqlalchemy import create_engine
@@ -18,7 +18,7 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
-engine = create_engine(settings.database_url)
+engine = create_engine(settings.database_url, echo=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
