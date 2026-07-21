@@ -19,21 +19,20 @@ get 전체조회 api
 orm → http response 스키마
 get 단일 조회 api
 refactoring
+
+2026-07-21
+post/patch/delete api DB 전환
 '''
 
-from fastapi import FastAPI, Body, HTTPException,Depends
+from fastapi import FastAPI, Body, HTTPException, Depends
 from datetime import datetime, timezone
-import random
-from .database.fake_posts import fake_posts
-from .database.fake_comments import fake_comments
-#from .schemas import PostCreate, CommentCreate
 from .schema.request import PostCreate, CommentCreate
-from .schema.response import ListPostSchema, PostListItemSchema,PostDetailSchema
+from .schema.response import ListPostSchema, PostListItemSchema, PostDetailSchema
 from typing import Optional
 from sqlalchemy.orm import Session
 from .database.connection import get_db
 from sqlalchemy import select, func
-from .database.orm import Post, Comment
+from .database.orm import Post, Comment, Image
 
 app = FastAPI()
 
@@ -97,89 +96,120 @@ def get_page_handler(
 
     return post
 
-@app.post("/page", status_code=201)#본문 쓰기
-def create_post_handler(request: PostCreate):
-    new_id = max(fake_posts.keys()) + 1   # 서버가 id 발급
-    now = datetime.now(timezone.utc).isoformat()
+@app.post("/page", status_code=201, response_model=PostDetailSchema)#본문 쓰기
+def create_post_handler(
+    request: PostCreate,
+    session: Session = Depends(get_db),
+):
+    post = Post.create(request=request)   # 글 객체 생성 (orm의 create)
+    session.add(post)
+    session.flush()                       # commit 전에 post.id 확보 (이미지 연결용)
 
-    fake_posts[new_id] = {
-        "id": new_id,
-        "created_at": now,
-        "updated_at": now,
-        "title": request.title,
-        "nickname": request.nickname,
-        "contents": request.contents,
-        "image": request.image,
-        "is_deleted": False,# 서버가 강제
-    }
-    return fake_posts[new_id]
+    # 이미지가 있으면 각각 Image 객체 만들어 매달기 (없으면 루프 안 돎)
+    for order, url in enumerate(request.image):
+        image = Image.create(url=url, post_id=post.id, display_order=order)
+        session.add(image)
 
-@app.post("/page/{post_id}/comment", status_code=201)#댓글 쓰기
-def create_comment_handler(post_id: int, request: CommentCreate):
-    post = fake_posts.get(post_id)
-    if post is None or post["is_deleted"]:      # 없는 글엔 댓글 못 닮
+    session.commit()                      # 글 + 이미지 한 번에 저장 확정
+    session.refresh(post)                 # 최신 상태 다시 읽기 (이미지 연결 포함)
+
+    return post
+
+@app.post("/page/{post_id}/comment", status_code=201, response_model=PostDetailSchema)#댓글 쓰기
+def create_comment_handler(
+    post_id: int,
+    request: CommentCreate,
+    session: Session = Depends(get_db),
+):
+    post = session.scalar(
+        select(Post).where(Post.id == post_id).where(Post.is_deleted == False)
+    )
+    if post is None:      # 없는 글엔 댓글 못 담
         raise HTTPException(status_code=404, detail="post not found")
 
-    new_id = max(fake_comments.keys()) + 1   # 댓글 고유 id 발급
-    now = datetime.now(timezone.utc).isoformat()
+    comment = Comment.create(request=request, post_id=post_id)   # 댓글 객체 생성
+    session.add(comment)
+    session.commit()
+    session.refresh(post)                 # 새 댓글 반영된 글 다시 읽기
 
-    fake_comments[new_id] = {
-        "id": new_id,
-        "post_id": post_id,     # URL의 post_id = 어느 글에 다는지
-        "created_at": now,
-        "updated_at": now,
-        "nickname": request.nickname,
-        "contents": request.contents,
-        "is_deleted": False,
-    }
-    return fake_comments[new_id]
+    # 삭제 안 된 댓글만 남기기
+    post.comments = [c for c in post.comments if not c.is_deleted]
 
-@app.patch("/page/{id}", status_code=200)#본문 수정
+    return post
+
+@app.patch("/page/{id}", status_code=200, response_model=PostDetailSchema)#본문 수정
 def update_post_handler(
     id: int,
     title: Optional[str] = Body(None, embed=True),
     contents: Optional[str] = Body(None, embed=True),
+    session: Session = Depends(get_db),
 ):
-    post = fake_posts.get(id)
-    if post is None or post["is_deleted"]:      # 없거나 삭제된 글
+    post = session.scalar(
+        select(Post).where(Post.id == id).where(Post.is_deleted == False)
+    )
+    if post is None:      # 없거나 삭제된 글
         raise HTTPException(status_code=404, detail="post not found")
 
     if title is not None:
-        post["title"] = title
+        post.title = title
     if contents is not None:
-        post["contents"] = contents
-    post["updated_at"] = datetime.now(timezone.utc).isoformat()
+        post.contents = contents
+    post.updated_at = datetime.now(timezone.utc)
+    session.commit()
+    session.refresh(post)
+
+    # 삭제 안 된 댓글만 남기기
+    post.comments = [c for c in post.comments if not c.is_deleted]
+
     return post
 
 @app.patch("/comment/{id}", status_code=200)#댓글 수정
 def update_comment_handler(
     id: int,
     contents: str = Body(..., embed=True),
+    session: Session = Depends(get_db),
 ):
-    comment = fake_comments.get(id)
-    if comment is None or comment["is_deleted"]:    # 없거나 삭제된 댓글
+    comment = session.scalar(
+        select(Comment).where(Comment.id == id).where(Comment.is_deleted == False)
+    )
+    if comment is None:      # 없거나 삭제된 댓글
         raise HTTPException(status_code=404, detail="comment not found")
 
-    comment["contents"] = contents
-    comment["updated_at"] = datetime.now(timezone.utc).isoformat()
+    comment.contents = contents
+    comment.updated_at = datetime.now(timezone.utc)
+    session.commit()
+    session.refresh(comment)
+
     return comment
 
 @app.delete("/page/{id}", status_code=204)#본문 삭제
-def delete_post_handler(id: int):
-    post = fake_posts.get(id)
-    if post is None or post["is_deleted"]:      # 없거나 이미 삭제된 글
+def delete_post_handler(
+    id: int,
+    session: Session = Depends(get_db),
+):
+    post = session.scalar(
+        select(Post).where(Post.id == id).where(Post.is_deleted == False)
+    )
+    if post is None:      # 없거나 이미 삭제된 글
         raise HTTPException(status_code=404, detail="post not found")
 
-    post["is_deleted"] = True
-    post["updated_at"] = datetime.now(timezone.utc).isoformat()
+    post.is_deleted = True   # 소프트삭제
+    post.updated_at = datetime.now(timezone.utc)
+    session.commit()
     return
 
 @app.delete("/comment/{id}", status_code=204)#댓글 삭제
-def delete_comment_handler(id: int):
-    comment = fake_comments.get(id)
-    if comment is None or comment["is_deleted"]:    # 없거나 이미 삭제된 댓글
+def delete_comment_handler(
+    id: int,
+    session: Session = Depends(get_db),
+):
+    comment = session.scalar(
+        select(Comment).where(Comment.id == id).where(Comment.is_deleted == False)
+    )
+    if comment is None:      # 없거나 이미 삭제된 댓글
         raise HTTPException(status_code=404, detail="comment not found")
 
-    comment["is_deleted"] = True
-    comment["updated_at"] = datetime.now(timezone.utc).isoformat()
+    comment.is_deleted = True   # 소프트삭제
+    comment.updated_at = datetime.now(timezone.utc)
+    session.commit()
     return

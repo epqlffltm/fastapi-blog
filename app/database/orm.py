@@ -4,11 +4,14 @@
 2026-07-20
 orm 모델링 (posts, comments, images)
 get 전체조회 api
+
+2026-07-21
+create classmethod 추가 (post api)
 '''
 
 from sqlalchemy import ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from datetime import datetime
+from datetime import datetime, timezone
 from .connection import Base    # connection의 Base 재사용 (새로 만들지 않음)
 
 
@@ -29,6 +32,17 @@ class Post(Base):
     def __repr__(self):
         return f"Post(id={self.id}, title={self.title})"
 
+    @classmethod
+    def create(cls, request) -> "Post":
+        now = datetime.now(timezone.utc)
+        return cls(
+            title=request.title,
+            nickname=request.nickname,
+            contents=request.contents,
+            created_at=now,
+            updated_at=now,
+        )
+
 
 class Comment(Base):
     __tablename__ = "comments"
@@ -46,6 +60,17 @@ class Comment(Base):
     def __repr__(self):
         return f"Comment(id={self.id}, post_id={self.post_id})"
 
+    @classmethod
+    def create(cls, request, post_id: int) -> "Comment":
+        now = datetime.now(timezone.utc)
+        return cls(
+            post_id=post_id,
+            nickname=request.nickname,
+            contents=request.contents,
+            created_at=now,
+            updated_at=now,
+        )
+
 
 class Image(Base):
     __tablename__ = "images"
@@ -59,3 +84,11 @@ class Image(Base):
 
     def __repr__(self):
         return f"Image(id={self.id}, post_id={self.post_id}, url={self.url})"
+
+    @classmethod
+    def create(cls, url: str, post_id: int, display_order: int = 0) -> "Image":
+        return cls(
+            url=url,
+            post_id=post_id,
+            display_order=display_order,
+        )
