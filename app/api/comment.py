@@ -3,14 +3,13 @@
 '''
 2026-07-21
 댓글 관련 라우터 (생성, 수정, 삭제)
+repository 패턴 적용
 '''
 
 from fastapi import APIRouter, Depends, HTTPException, Body
 from datetime import datetime, timezone
-from sqlalchemy.orm import Session
-from sqlalchemy import select
-from ..database.connection import get_db
-from ..database.orm import Post, Comment
+from ..database.repository import PostRepository, CommentRepository
+from ..database.orm import Comment
 from ..schema.request import CommentCreate
 from ..schema.response import PostDetailSchema
 
@@ -21,19 +20,18 @@ router = APIRouter(tags=["comment"])
 def create_comment_handler(
     post_id: int,
     request: CommentCreate,
-    session: Session = Depends(get_db),
+    post_repo: PostRepository = Depends(),
+    comment_repo: CommentRepository = Depends(),
 ):
-    post = session.scalar(
-        select(Post).where(Post.id == post_id).where(Post.is_deleted == False)
-    )
+    post = post_repo.get_post_by_id(post_id)
     if post is None:
         raise HTTPException(status_code=404, detail="post not found")
 
     comment = Comment.create(request=request, post_id=post_id)
-    session.add(comment)
-    session.commit()
-    session.refresh(post)
+    comment_repo.save(comment)
 
+    # 새 댓글 반영된 글 다시 읽기
+    post = post_repo.get_post_by_id(post_id)
     post.comments = [c for c in post.comments if not c.is_deleted]
     return post
 
@@ -42,33 +40,28 @@ def create_comment_handler(
 def update_comment_handler(
     id: int,
     contents: str = Body(..., embed=True),
-    session: Session = Depends(get_db),
+    comment_repo: CommentRepository = Depends(),
 ):
-    comment = session.scalar(
-        select(Comment).where(Comment.id == id).where(Comment.is_deleted == False)
-    )
+    comment = comment_repo.get_comment_by_id(id)
     if comment is None:
         raise HTTPException(status_code=404, detail="comment not found")
 
     comment.contents = contents
     comment.updated_at = datetime.now(timezone.utc)
-    session.commit()
-    session.refresh(comment)
+    comment = comment_repo.update(comment)
     return comment
 
 
 @router.delete("/comment/{id}", status_code=204)#댓글 삭제
 def delete_comment_handler(
     id: int,
-    session: Session = Depends(get_db),
+    comment_repo: CommentRepository = Depends(),
 ):
-    comment = session.scalar(
-        select(Comment).where(Comment.id == id).where(Comment.is_deleted == False)
-    )
+    comment = comment_repo.get_comment_by_id(id)
     if comment is None:
         raise HTTPException(status_code=404, detail="comment not found")
 
     comment.is_deleted = True
     comment.updated_at = datetime.now(timezone.utc)
-    session.commit()
+    comment_repo.update(comment)
     return
