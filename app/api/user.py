@@ -4,15 +4,19 @@
 2026-07-23
 회원 관련 라우터 (회원가입)
 로그인 + 내 정보
+
+2026-07-24
+엔드포인트 2개 추가
 '''
 
 from fastapi import APIRouter, Depends, HTTPException
 from ..database.repository import UserRepository
 from ..database.orm import User
 from ..service.auth import AuthService
-from ..schema.request import SignUpRequest, LogInRequest
 from ..schema.response import UserSchema, JWTResponse
 from .dependency import get_current_user
+from ..schema.request import SignUpRequest, LogInRequest, VerifyOTPRequest
+from ..service.otp import OTPService
 
 router = APIRouter(prefix="/user", tags=["user"])
 
@@ -60,4 +64,40 @@ def log_in_handler(
 def get_me_handler(
     current_user: User = Depends(get_current_user),
 ):
+    return current_user
+
+@router.post("/email/otp", status_code=200)#인증코드 발급
+def create_otp_handler(
+    current_user: User = Depends(get_current_user),
+    otp_service: OTPService = Depends(),
+):
+    if current_user.is_verified:
+        raise HTTPException(status_code=409, detail="already verified")
+
+    otp = otp_service.create_otp()
+    otp_service.save_otp(email=current_user.email, otp=otp)
+
+    print(f"[OTP] {current_user.email} → {otp}")   # 이메일 발송 붙이기 전 임시 확인용
+
+    # TODO: 이메일 발송 붙이면 otp는 응답에서 제거할 것
+    return {"email": current_user.email, "otp": otp, "expires_in": otp_service.ttl}
+
+
+@router.post("/email/otp/verify", status_code=200, response_model=UserSchema)#인증코드 검증
+def verify_otp_handler(
+    request: VerifyOTPRequest,
+    current_user: User = Depends(get_current_user),
+    otp_service: OTPService = Depends(),
+    user_repo: UserRepository = Depends(),
+):
+    saved = otp_service.get_otp(current_user.email)
+    if saved is None:      # 발급 안 했거나 3분이 지나 만료됨
+        raise HTTPException(status_code=400, detail="otp expired or not issued")
+    if saved != request.otp:
+        raise HTTPException(status_code=400, detail="invalid otp")
+
+    current_user.is_verified = True
+    user_repo.update_user(current_user)
+    otp_service.delete_otp(current_user.email)   # 1회용이므로 즉시 폐기
+
     return current_user

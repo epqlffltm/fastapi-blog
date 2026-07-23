@@ -6,6 +6,7 @@
 
 2026-07-23
 인증/권한 반영
+
 '''
 
 from datetime import datetime, timezone
@@ -130,3 +131,5 @@ def test_delete_comment_not_found(auth_client, mock_comment_repo):
     response = auth_client.delete("/comment/999")
 
     assert response.status_code == 404
+    
+    

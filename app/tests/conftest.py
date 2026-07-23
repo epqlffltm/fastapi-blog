@@ -16,6 +16,8 @@ from app.main import app
 from app.database.orm import User
 from app.database.repository import PostRepository, CommentRepository, UserRepository
 from app.api.dependency import get_current_user
+from redis import Redis
+from app.database.cache import get_redis_client
 
 
 @pytest.fixture
@@ -64,4 +66,11 @@ def mock_user_repo():
     repo = Mock(spec=UserRepository)
     app.dependency_overrides[UserRepository] = lambda: repo
     yield repo
+    app.dependency_overrides.clear()
+    
+@pytest.fixture
+def mock_redis():
+    redis = Mock(spec=Redis)
+    app.dependency_overrides[get_redis_client] = lambda: redis
+    yield redis
     app.dependency_overrides.clear()

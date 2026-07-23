@@ -107,3 +107,8 @@ class UserRepository:
     
     def get_user_by_id(self, id: int) -> User | None:
         return self.session.scalar(select(User).where(User.id == id))
+    
+    def update_user(self, user: User) -> User:
+        self.session.commit()
+        self.session.refresh(user)
+        return user

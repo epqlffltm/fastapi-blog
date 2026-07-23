@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     database_url: str
     jwt_secret_key: str
     jwt_algorithm: str = "HS256"
+    redis_host: str = "127.0.0.1"   # 추가
+    redis_port: int = 6379          # 추가
 
 
 settings = Settings()

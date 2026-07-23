@@ -34,3 +34,6 @@ class SignUpRequest(BaseModel):
 class LogInRequest(BaseModel):
     email: EmailStr
     password: str
+    
+class VerifyOTPRequest(BaseModel):
+    otp: int = Field(ge=100_000, le=999_999)
