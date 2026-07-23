@@ -10,6 +10,7 @@ create classmethod 추가 (post api)
 
 2026-07-23
 회원 테이블
+nickname → user_id FK 전환
 '''
 
 from sqlalchemy import ForeignKey, String
@@ -22,13 +23,15 @@ class Post(Base):
     __tablename__ = "posts"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     created_at: Mapped[datetime]
     updated_at: Mapped[datetime]
     title: Mapped[str]
-    nickname: Mapped[str]
     contents: Mapped[str]
     is_deleted: Mapped[bool] = mapped_column(default=False)
 
+    # N:1 이라 joined 로딩이 적합 (글 하나당 작성자 하나)
+    user: Mapped["User"] = relationship(back_populates="posts", lazy="joined")
     comments: Mapped[list["Comment"]] = relationship(back_populates="post")
     images: Mapped[list["Image"]] = relationship(back_populates="post")
 
@@ -36,12 +39,12 @@ class Post(Base):
         return f"Post(id={self.id}, title={self.title})"
 
     @classmethod
-    def create(cls, request) -> "Post":
+    def create(cls, request, user_id: int) -> "Post":
         now = datetime.now(timezone.utc)
         return cls(
             title=request.title,
-            nickname=request.nickname,
             contents=request.contents,
+            user_id=user_id,          # 작성자는 요청이 아니라 토큰에서 온다
             created_at=now,
             updated_at=now,
         )
@@ -52,23 +55,24 @@ class Comment(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     post_id: Mapped[int] = mapped_column(ForeignKey("posts.id"))
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     created_at: Mapped[datetime]
     updated_at: Mapped[datetime]
-    nickname: Mapped[str]
     contents: Mapped[str]
     is_deleted: Mapped[bool] = mapped_column(default=False)
 
     post: Mapped["Post"] = relationship(back_populates="comments")
+    user: Mapped["User"] = relationship(back_populates="comments", lazy="joined")
 
     def __repr__(self):
         return f"Comment(id={self.id}, post_id={self.post_id})"
 
     @classmethod
-    def create(cls, request, post_id: int) -> "Comment":
+    def create(cls, request, post_id: int, user_id: int) -> "Comment":
         now = datetime.now(timezone.utc)
         return cls(
             post_id=post_id,
-            nickname=request.nickname,
+            user_id=user_id,
             contents=request.contents,
             created_at=now,
             updated_at=now,
@@ -95,26 +99,26 @@ class Image(Base):
             post_id=post_id,
             display_order=display_order,
         )
-        
-        
+
+
 class User(Base):    # 회원 테이블
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    email: Mapped[str] = mapped_column(String(256), unique=True, index=True)   # 로그인 ID
-    password: Mapped[str] = mapped_column(String(256))                          # bcrypt 해시
-    nickname: Mapped[str] = mapped_column(String(64), unique=True)              # 표시 이름
-    is_verified: Mapped[bool] = mapped_column(default=False)                    # 이메일 인증 여부
+    email: Mapped[str] = mapped_column(String(256), unique=True, index=True)
+    password: Mapped[str] = mapped_column(String(256))
+    nickname: Mapped[str] = mapped_column(String(64), unique=True)
+    is_verified: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime]
 
-    # posts/comments relationship은 Post/Comment에 user_id FK 추가한 뒤에
+    posts: Mapped[list["Post"]] = relationship(back_populates="user")
+    comments: Mapped[list["Comment"]] = relationship(back_populates="user")
 
     def __repr__(self):
         return f"User(id={self.id}, email={self.email})"
 
     @classmethod
     def create(cls, email: str, hashed_password: str, nickname: str) -> "User":
-        # 반드시 해싱된 비번을 받는다 (평문 저장 금지)
         return cls(
             email=email,
             password=hashed_password,
