@@ -3,6 +3,9 @@
 '''
 2026-07-20
 db연결
+
+2026-07-23
+Settings에 필드 추가
 '''
 
 from sqlalchemy import create_engine
@@ -14,6 +17,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env")
 
     database_url: str
+    jwt_secret_key: str
+    jwt_algorithm: str = "HS256"
 
 
 settings = Settings()

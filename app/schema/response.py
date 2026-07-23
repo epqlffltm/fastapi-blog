@@ -7,6 +7,7 @@ get 단일 조회 api
 
 2026-07-23
 회원 응답 추가
+토큰 응답 추가
 '''
 
 from pydantic import BaseModel, ConfigDict
@@ -62,3 +63,7 @@ class UserSchema(BaseModel): #회원 응답 추가
     nickname: str
     is_verified: bool
     # password는 절대 포함하지 않는다
+    
+class JWTResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"

@@ -6,6 +6,7 @@ refactoring
 
 2026-07-23
 회원가입 요청 추가
+로그인 요청 추가
 '''
 
 from pydantic import BaseModel, EmailStr, Field
@@ -25,3 +26,7 @@ class SignUpRequest(BaseModel):
     email: EmailStr                          # 이메일 형식 자동 검증
     password: str = Field(min_length=8, max_length=72)   # bcrypt 72바이트 제한
     nickname: str = Field(min_length=2, max_length=20)
+    
+class LogInRequest(BaseModel):
+    email: EmailStr
+    password: str

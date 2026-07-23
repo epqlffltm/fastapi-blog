@@ -5,7 +5,10 @@
 회원 API 테스트
 '''
 
-from datetime import datetime, timezone
+import jwt
+import pytest
+from datetime import datetime, timedelta, timezone
+from app.database.connection import settings
 from app.database.orm import User
 from app.service.auth import AuthService
 
@@ -113,3 +116,110 @@ def test_hash_is_salted():
     assert h1 != h2
     assert service.verify_password("password123", h1) is True
     assert service.verify_password("password123", h2) is True
+    
+# ---------- 로그인 ----------
+
+def test_log_in(client, mock_user_repo):
+    service = AuthService()
+    user = _make_user()
+    user.password = service.hash_password("password123")   # 실제 해시로 교체
+    mock_user_repo.get_user_by_email.return_value = user
+
+    response = client.post(
+        "/user/log-in",
+        json={"email": "test@example.com", "password": "password123"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "access_token" in data
+    assert data["token_type"] == "bearer"
+
+
+def test_log_in_wrong_password(client, mock_user_repo):
+    service = AuthService()
+    user = _make_user()
+    user.password = service.hash_password("password123")
+    mock_user_repo.get_user_by_email.return_value = user
+
+    response = client.post(
+        "/user/log-in",
+        json={"email": "test@example.com", "password": "wrongpassword"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "invalid email or password"
+
+
+def test_log_in_no_such_email(client, mock_user_repo):
+    mock_user_repo.get_user_by_email.return_value = None
+
+    response = client.post(
+        "/user/log-in",
+        json={"email": "nobody@example.com", "password": "password123"},
+    )
+
+    assert response.status_code == 401
+    # 없는 계정도 비번 틀림과 같은 메시지여야 한다
+    assert response.json()["detail"] == "invalid email or password"
+
+
+# ---------- 내 정보 (토큰 인증) ----------
+
+def test_get_me(client, mock_user_repo):
+    user = _make_user()
+    mock_user_repo.get_user_by_id.return_value = user
+    token = AuthService().create_jwt(user.id)
+
+    response = client.get("/user/me", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["email"] == "test@example.com"
+    assert "password" not in data
+
+
+def test_get_me_without_token(client, mock_user_repo):
+    response = client.get("/user/me")
+
+    assert response.status_code == 401
+
+
+def test_get_me_invalid_token(client, mock_user_repo):
+    response = client.get("/user/me", headers={"Authorization": "Bearer garbage"})
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "invalid token"
+
+
+# ---------- JWT 자체 테스트 ----------
+
+def test_jwt_roundtrip():
+    service = AuthService()
+    token = service.create_jwt(user_id=42)
+
+    assert service.decode_jwt(token) == 42
+
+
+def test_decode_expired_token():
+    service = AuthService()
+    expired = jwt.encode(
+        {"sub": "1", "exp": datetime.now(timezone.utc) - timedelta(seconds=1)},
+        settings.jwt_secret_key,
+        algorithm=settings.jwt_algorithm,
+    )
+
+    with pytest.raises(jwt.ExpiredSignatureError):
+        service.decode_jwt(expired)
+
+
+def test_decode_tampered_token():
+    service = AuthService()
+    forged = jwt.encode(
+        {"sub": "1", "exp": datetime.now(timezone.utc) + timedelta(days=1)},
+        "wrong-secret-key",      # 다른 키로 서명
+        algorithm=settings.jwt_algorithm,
+    )
+
+    with pytest.raises(jwt.InvalidSignatureError):
+        service.decode_jwt(forged)

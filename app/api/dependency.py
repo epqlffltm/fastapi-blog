@@ -1,0 +1,42 @@
+#app/api/dependency.py
+
+'''
+2026-07-23
+인증 의존성 (요청 헤더의 토큰 → User)
+'''
+
+import jwt
+from fastapi import Depends, HTTPException
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from ..database.orm import User
+from ..database.repository import UserRepository
+from ..service.auth import AuthService
+
+
+def get_access_token(
+    auth_header: HTTPAuthorizationCredentials | None = Depends(
+        HTTPBearer(auto_error=False)
+    ),
+) -> str:
+    # Authorization: Bearer <token> 에서 토큰만 꺼낸다
+    if auth_header is None:
+        raise HTTPException(status_code=401, detail="not authorized")
+    return auth_header.credentials
+
+
+def get_current_user(
+    access_token: str = Depends(get_access_token),
+    auth_service: AuthService = Depends(),
+    user_repo: UserRepository = Depends(),
+) -> User:
+    try:
+        user_id = auth_service.decode_jwt(access_token)
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="token expired")
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="invalid token")
+
+    user = user_repo.get_user_by_id(user_id)
+    if user is None:      # 토큰은 유효한데 계정이 사라진 경우
+        raise HTTPException(status_code=401, detail="user not found")
+    return user

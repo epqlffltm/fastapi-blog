@@ -9,6 +9,7 @@ DB 접근 계층 (repository)
 
 2026-07-23
 UserRepository 추가
+UserRepository에 메서드 추가
 '''
 
 from fastapi import Depends
@@ -103,3 +104,6 @@ class UserRepository:
         self.session.commit()
         self.session.refresh(user)
         return user
+    
+    def get_user_by_id(self, id: int) -> User | None:
+        return self.session.scalar(select(User).where(User.id == id))
