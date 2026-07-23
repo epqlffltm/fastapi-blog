@@ -22,17 +22,24 @@ refactoring
 
 2026-07-21
 api 라우터 분리 (post, comment)
+
+2026-07-21
+user 라우터 등록
 '''
 
 from fastapi import FastAPI
-from .api import post, comment
+from .api import post, comment, user
 
 app = FastAPI()
 
 app.include_router(post.router)
 app.include_router(comment.router)
+app.include_router(user.router)
 
 
 @app.get("/", status_code=200)#index
 async def index():
     return {"message": "Hello, FastAPI"}
+
+
+

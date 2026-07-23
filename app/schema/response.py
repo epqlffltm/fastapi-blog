@@ -4,6 +4,9 @@
 2026-07-20
 orm → http response 스키마
 get 단일 조회 api
+
+2026-07-23
+회원 응답 추가
 '''
 
 from pydantic import BaseModel, ConfigDict
@@ -50,3 +53,12 @@ class PostDetailSchema(BaseModel):
     updated_at: datetime
     comments: list[CommentSchema]      # 댓글들 중첩
     images: list[ImageSchema]          # 이미지들 중첩
+    
+class UserSchema(BaseModel): #회원 응답 추가
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    email: str
+    nickname: str
+    is_verified: bool
+    # password는 절대 포함하지 않는다

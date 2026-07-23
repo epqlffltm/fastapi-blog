@@ -6,13 +6,16 @@ get 전체조회 api
 
 2026-07-21
 DB 접근 계층 (repository)
+
+2026-07-23
+UserRepository 추가
 '''
 
 from fastapi import Depends
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 from .connection import get_db
-from .orm import Post, Comment
+from .orm import Post, Comment, Image, User
 
 
 class PostRepository:
@@ -84,3 +87,19 @@ class CommentRepository:
         self.session.commit()
         self.session.refresh(comment)
         return comment
+    
+class UserRepository:
+    def __init__(self, session: Session = Depends(get_db)):
+        self.session = session
+
+    def get_user_by_email(self, email: str) -> User | None:
+        return self.session.scalar(select(User).where(User.email == email))
+
+    def get_user_by_nickname(self, nickname: str) -> User | None:
+        return self.session.scalar(select(User).where(User.nickname == nickname))
+
+    def save_user(self, user: User) -> User:
+        self.session.add(user)
+        self.session.commit()
+        self.session.refresh(user)
+        return user

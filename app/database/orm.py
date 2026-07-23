@@ -7,9 +7,12 @@ get 전체조회 api
 
 2026-07-21
 create classmethod 추가 (post api)
+
+2026-07-23
+회원 테이블
 '''
 
-from sqlalchemy import ForeignKey
+from sqlalchemy import ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime, timezone
 from .connection import Base    # connection의 Base 재사용 (새로 만들지 않음)
@@ -91,4 +94,30 @@ class Image(Base):
             url=url,
             post_id=post_id,
             display_order=display_order,
+        )
+        
+        
+class User(Base):    # 회원 테이블
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    email: Mapped[str] = mapped_column(String(256), unique=True, index=True)   # 로그인 ID
+    password: Mapped[str] = mapped_column(String(256))                          # bcrypt 해시
+    nickname: Mapped[str] = mapped_column(String(64), unique=True)              # 표시 이름
+    is_verified: Mapped[bool] = mapped_column(default=False)                    # 이메일 인증 여부
+    created_at: Mapped[datetime]
+
+    # posts/comments relationship은 Post/Comment에 user_id FK 추가한 뒤에
+
+    def __repr__(self):
+        return f"User(id={self.id}, email={self.email})"
+
+    @classmethod
+    def create(cls, email: str, hashed_password: str, nickname: str) -> "User":
+        # 반드시 해싱된 비번을 받는다 (평문 저장 금지)
+        return cls(
+            email=email,
+            password=hashed_password,
+            nickname=nickname,
+            created_at=datetime.now(timezone.utc),
         )
