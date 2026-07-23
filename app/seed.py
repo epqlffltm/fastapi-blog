@@ -2,16 +2,13 @@
 
 '''
 2026-07-20
-fake 데이터를 DB에 넣는 시드 스크립트 (최초 1회)
-
-2026-07-22
 초기 테스트 데이터를 DB에 넣는 시드 스크립트 (최초 1회)
 
 2026-07-23
 회원 먼저 생성 후 글/댓글을 user_id로 연결
 
 2026-07-24
-시드 계정은 인증됨으로
+시드 계정은 인증됨으로 생성
 '''
 
 from datetime import datetime
@@ -19,7 +16,7 @@ from .database.connection import SessionFactory
 from .database.orm import Post, Comment, Image, User
 from .service.auth import AuthService
 
-session.flush()
+
 # 시드 계정 (비번은 전부 seedpass123)
 users_data = ["hong", "gil", "dong", "kim", "lee", "park", "choi", "jung", "yoon"]
 
@@ -32,13 +29,13 @@ posts_data = [
         "contents": "새로온 파티원이 로그일때 로그의 말은 '나로는 부족해?'",
         "comments": [
             {"author": "kim",
-            "created_at": datetime.fromisoformat("2026-07-16T09:10:00+00:00"),
-            "updated_at": datetime.fromisoformat("2026-07-16T09:10:00+00:00"),
-            "contents": "응, 로그 실력이 부족해"},
+             "created_at": datetime.fromisoformat("2026-07-16T09:10:00+00:00"),
+             "updated_at": datetime.fromisoformat("2026-07-16T09:10:00+00:00"),
+             "contents": "응, 로그 실력이 부족해"},
             {"author": "lee",
-            "created_at": datetime.fromisoformat("2026-07-16T09:20:00+00:00"),
-            "updated_at": datetime.fromisoformat("2026-07-16T09:20:00+00:00"),
-            "contents": "로그 수는 부족하진 않아"},
+             "created_at": datetime.fromisoformat("2026-07-16T09:20:00+00:00"),
+             "updated_at": datetime.fromisoformat("2026-07-16T09:20:00+00:00"),
+             "contents": "로그 수는 부족하진 않아"},
         ],
         "images": [
             {"url": "https://example.com/dnd1_a.jpg", "display_order": 0},
@@ -53,17 +50,17 @@ posts_data = [
         "contents": "새로온 파티원이 바바리안일때 바바리안 왈 '바바리안, 뭉치면 강하다'",
         "comments": [
             {"author": "park",
-            "created_at": datetime.fromisoformat("2026-07-16T10:40:00+00:00"),
-            "updated_at": datetime.fromisoformat("2026-07-16T10:40:00+00:00"),
-            "contents": "바바리안, 계획이 있다"},
+             "created_at": datetime.fromisoformat("2026-07-16T10:40:00+00:00"),
+             "updated_at": datetime.fromisoformat("2026-07-16T10:40:00+00:00"),
+             "contents": "바바리안, 계획이 있다"},
             {"author": "choi",
-            "created_at": datetime.fromisoformat("2026-07-16T10:45:00+00:00"),
-            "updated_at": datetime.fromisoformat("2026-07-16T10:45:00+00:00"),
-            "contents": "바바리안, 계획은 도끼질이다"},
+             "created_at": datetime.fromisoformat("2026-07-16T10:45:00+00:00"),
+             "updated_at": datetime.fromisoformat("2026-07-16T10:45:00+00:00"),
+             "contents": "바바리안, 계획은 도끼질이다"},
             {"author": "jung",
-            "created_at": datetime.fromisoformat("2026-07-16T10:50:00+00:00"),
-            "updated_at": datetime.fromisoformat("2026-07-16T10:50:00+00:00"),
-            "contents": "바바리안, 찢고 죽인다"},
+             "created_at": datetime.fromisoformat("2026-07-16T10:50:00+00:00"),
+             "updated_at": datetime.fromisoformat("2026-07-16T10:50:00+00:00"),
+             "contents": "바바리안, 찢고 죽인다"},
         ],
         "images": [
             {"url": "https://example.com/dnd2_a.jpg", "display_order": 0},
@@ -77,9 +74,9 @@ posts_data = [
         "contents": "둥그런 선술집을 지으세요",
         "comments": [
             {"author": "yoon",
-            "created_at": datetime.fromisoformat("2026-07-16T14:25:00+00:00"),
-            "updated_at": datetime.fromisoformat("2026-07-16T14:25:00+00:00"),
-            "contents": "로그가 구석에서 비릿한 웃음을 짓지 못하도록"},
+             "created_at": datetime.fromisoformat("2026-07-16T14:25:00+00:00"),
+             "updated_at": datetime.fromisoformat("2026-07-16T14:25:00+00:00"),
+             "contents": "로그가 구석에서 비릿한 웃음을 짓지 못하도록"},
         ],
         "images": [],
     },
@@ -99,7 +96,7 @@ def seed():
                 hashed_password=hashed,
                 nickname=nickname,
             )
-            session.flush()
+            user.is_verified = True      # 시드 계정은 인증된 것으로
             session.add(user)
             nickname_to_user[nickname] = user
 
