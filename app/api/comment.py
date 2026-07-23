@@ -7,6 +7,9 @@ repository 패턴 적용
 
 2026-07-23
 인증 연동 + 권한 검사
+
+2026-07-24
+댓글 작성에 이메일 인증 요구
 '''
 
 from fastapi import APIRouter, Depends, HTTPException, Body
@@ -15,7 +18,7 @@ from ..database.repository import PostRepository, CommentRepository
 from ..database.orm import Comment, User
 from ..schema.request import CommentCreate
 from ..schema.response import PostDetailSchema
-from .dependency import get_current_user
+from .dependency import get_current_user, get_verified_user
 
 router = APIRouter(tags=["comment"])
 
@@ -24,7 +27,7 @@ router = APIRouter(tags=["comment"])
 def create_comment_handler(
     post_id: int,
     request: CommentCreate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_verified_user),   # 이메일 인증된 회원만
     post_repo: PostRepository = Depends(),
     comment_repo: CommentRepository = Depends(),
 ):

@@ -3,6 +3,9 @@
 '''
 2026-07-23
 인증 의존성 (요청 헤더의 토큰 → User)
+
+2026-07-24
+인증된 유저 의존성 추가
 '''
 
 import jwt
@@ -40,3 +43,10 @@ def get_current_user(
     if user is None:      # 토큰은 유효한데 계정이 사라진 경우
         raise HTTPException(status_code=401, detail="user not found")
     return user
+
+def get_verified_user(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    if not current_user.is_verified:
+        raise HTTPException(status_code=403, detail="email not verified")
+    return current_user

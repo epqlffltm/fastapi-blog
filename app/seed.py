@@ -9,6 +9,9 @@ fake 데이터를 DB에 넣는 시드 스크립트 (최초 1회)
 
 2026-07-23
 회원 먼저 생성 후 글/댓글을 user_id로 연결
+
+2026-07-24
+시드 계정은 인증됨으로
 '''
 
 from datetime import datetime
@@ -16,7 +19,7 @@ from .database.connection import SessionFactory
 from .database.orm import Post, Comment, Image, User
 from .service.auth import AuthService
 
-
+session.flush()
 # 시드 계정 (비번은 전부 seedpass123)
 users_data = ["hong", "gil", "dong", "kim", "lee", "park", "choi", "jung", "yoon"]
 
@@ -96,6 +99,7 @@ def seed():
                 hashed_password=hashed,
                 nickname=nickname,
             )
+            session.flush()
             session.add(user)
             nickname_to_user[nickname] = user
 

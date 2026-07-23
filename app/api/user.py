@@ -7,9 +7,10 @@
 
 2026-07-24
 엔드포인트 2개 추가
+create_otp_handler 교체
 '''
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from ..database.repository import UserRepository
 from ..database.orm import User
 from ..service.auth import AuthService
@@ -17,6 +18,7 @@ from ..schema.response import UserSchema, JWTResponse
 from .dependency import get_current_user
 from ..schema.request import SignUpRequest, LogInRequest, VerifyOTPRequest
 from ..service.otp import OTPService
+from ..service.email import EmailService
 
 router = APIRouter(prefix="/user", tags=["user"])
 
@@ -68,19 +70,23 @@ def get_me_handler(
 
 @router.post("/email/otp", status_code=200)#인증코드 발급
 def create_otp_handler(
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     otp_service: OTPService = Depends(),
+    email_service: EmailService = Depends(),
 ):
     if current_user.is_verified:
         raise HTTPException(status_code=409, detail="already verified")
+    if not otp_service.start_cooldown(current_user.email):
+        raise HTTPException(status_code=429, detail="too many requests")
 
     otp = otp_service.create_otp()
     otp_service.save_otp(email=current_user.email, otp=otp)
 
-    print(f"[OTP] {current_user.email} → {otp}")   # 이메일 발송 붙이기 전 임시 확인용
+    # 메일 발송은 느리므로 응답을 먼저 보내고 뒤에서 처리
+    background_tasks.add_task(email_service.send_otp, current_user.email, otp)
 
-    # TODO: 이메일 발송 붙이면 otp는 응답에서 제거할 것
-    return {"email": current_user.email, "otp": otp, "expires_in": otp_service.ttl}
+    return {"email": current_user.email, "expires_in": otp_service.ttl}
 
 
 @router.post("/email/otp/verify", status_code=200, response_model=UserSchema)#인증코드 검증

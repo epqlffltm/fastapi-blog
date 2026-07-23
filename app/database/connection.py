@@ -19,8 +19,12 @@ class Settings(BaseSettings):
     database_url: str
     jwt_secret_key: str
     jwt_algorithm: str = "HS256"
-    redis_host: str = "127.0.0.1"   # 추가
-    redis_port: int = 6379          # 추가
+    redis_host: str = "127.0.0.1"
+    redis_port: int = 6379
+    smtp_host: str = "smtp.gmail.com"      # 추가
+    smtp_port: int = 587                    # 추가
+    smtp_user: str = ""                     # 추가
+    smtp_password: str = ""                 # 추가
 
 
 settings = Settings()

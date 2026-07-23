@@ -6,18 +6,22 @@
 
 2026-07-23
 인증 fixture 추가
+
+2026-07-24
+이메일/미인증 fixture 추가
 '''
 
 import pytest
 from datetime import datetime, timezone
 from fastapi.testclient import TestClient
 from unittest.mock import Mock
+from redis import Redis
 from app.main import app
 from app.database.orm import User
 from app.database.repository import PostRepository, CommentRepository, UserRepository
-from app.api.dependency import get_current_user
-from redis import Redis
 from app.database.cache import get_redis_client
+from app.api.dependency import get_current_user
+from app.service.email import EmailService
 
 
 @pytest.fixture
@@ -32,7 +36,7 @@ def current_user():
         email="test@example.com",
         password="$2b$12$fakehashedpassword",
         nickname="tester",
-        is_verified=False,
+        is_verified=True,
         created_at=datetime(2026, 7, 23, tzinfo=timezone.utc),
     )
 
@@ -40,6 +44,15 @@ def current_user():
 @pytest.fixture
 def auth_client(client, current_user):
     """로그인된 상태의 클라이언트 (get_current_user를 고정 유저로 교체)"""
+    app.dependency_overrides[get_current_user] = lambda: current_user
+    yield client
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def unverified_client(client, current_user):
+    """이메일 미인증 상태의 클라이언트"""
+    current_user.is_verified = False
     app.dependency_overrides[get_current_user] = lambda: current_user
     yield client
     app.dependency_overrides.clear()
@@ -67,10 +80,19 @@ def mock_user_repo():
     app.dependency_overrides[UserRepository] = lambda: repo
     yield repo
     app.dependency_overrides.clear()
-    
+
+
 @pytest.fixture
 def mock_redis():
     redis = Mock(spec=Redis)
     app.dependency_overrides[get_redis_client] = lambda: redis
     yield redis
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def mock_email_service():
+    service = Mock(spec=EmailService)
+    app.dependency_overrides[EmailService] = lambda: service
+    yield service
     app.dependency_overrides.clear()

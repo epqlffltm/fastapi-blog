@@ -7,6 +7,9 @@ repository 패턴 적용
 
 2026-07-23
 인증 연동 + 권한 검사
+
+2026-07-24
+글 작성에 이메일 인증 요구
 '''
 
 from fastapi import APIRouter, Depends, HTTPException, Body
@@ -15,10 +18,8 @@ from typing import Optional
 from ..database.repository import PostRepository
 from ..database.orm import Post, User
 from ..schema.request import PostCreate
-from ..schema.response import (
-    ListPostSchema, PostListItemSchema, PostDetailSchema, UserBriefSchema,
-)
-from .dependency import get_current_user
+from ..schema.response import ListPostSchema, PostListItemSchema, PostDetailSchema, UserBriefSchema
+from .dependency import get_current_user, get_verified_user
 
 router = APIRouter(tags=["post"])
 
@@ -62,7 +63,7 @@ def get_page_handler(
 @router.post("/page", status_code=201, response_model=PostDetailSchema)#본문 쓰기
 def create_post_handler(
     request: PostCreate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_verified_user),   # 이메일 인증된 회원만
     post_repo: PostRepository = Depends(),
 ):
     post = Post.create(request=request, user_id=current_user.id)
