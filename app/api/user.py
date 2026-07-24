@@ -16,7 +16,7 @@ from ..database.orm import User
 from ..service.auth import AuthService
 from ..schema.response import UserSchema, JWTResponse
 from .dependency import get_current_user
-from ..schema.request import SignUpRequest, LogInRequest, VerifyOTPRequest
+from ..schema.request import SignUpRequest, LogInRequest, VerifyOTPRequest, ResetPasswordRequest, ResetPasswordVerifyRequest
 from ..service.otp import OTPService
 from ..service.email import EmailService
 
@@ -77,11 +77,11 @@ def create_otp_handler(
 ):
     if current_user.is_verified:
         raise HTTPException(status_code=409, detail="already verified")
-    if not otp_service.start_cooldown(current_user.email):
+    if not otp_service.start_cooldown(current_user.email, purpose="signup"):
         raise HTTPException(status_code=429, detail="too many requests")
 
     otp = otp_service.create_otp()
-    otp_service.save_otp(email=current_user.email, otp=otp)
+    otp_service.save_otp(email=current_user.email, otp=otp, purpose="signup")
 
     # 메일 발송은 느리므로 응답을 먼저 보내고 뒤에서 처리
     background_tasks.add_task(email_service.send_otp, current_user.email, otp)
@@ -96,7 +96,7 @@ def verify_otp_handler(
     otp_service: OTPService = Depends(),
     user_repo: UserRepository = Depends(),
 ):
-    saved = otp_service.get_otp(current_user.email)
+    saved = otp_service.get_otp(current_user.email, purpose="signup")
     if saved is None:      # 발급 안 했거나 3분이 지나 만료됨
         raise HTTPException(status_code=400, detail="otp expired or not issued")
     if saved != request.otp:
@@ -104,6 +104,49 @@ def verify_otp_handler(
 
     current_user.is_verified = True
     user_repo.update_user(current_user)
-    otp_service.delete_otp(current_user.email)   # 1회용이므로 즉시 폐기
+    otp_service.delete_otp(current_user.email, purpose="signup")   # 1회용이므로 즉시 폐기
 
     return current_user
+
+@router.post("/password/reset", status_code=200)#비번 재설정 코드 발송
+def reset_password_handler(
+    request: ResetPasswordRequest,
+    background_tasks: BackgroundTasks,
+    user_repo: UserRepository = Depends(),
+    otp_service: OTPService = Depends(),
+    email_service: EmailService = Depends(),
+):
+    # 계정이 없어도 있는 것처럼 응답한다 (가입 여부 노출 방지)
+    user = user_repo.get_user_by_email(request.email)
+    if user is not None and otp_service.start_cooldown(request.email, purpose="reset"):
+        otp = otp_service.create_otp()
+        otp_service.save_otp(email=request.email, otp=otp, purpose="reset")
+        background_tasks.add_task(
+            email_service.send_password_reset, request.email, otp
+        )
+
+    return {"message": "if the email exists, a code has been sent"}
+
+
+@router.post("/password/reset/verify", status_code=200)#비번 재설정 실행
+def reset_password_verify_handler(
+    request: ResetPasswordVerifyRequest,
+    user_repo: UserRepository = Depends(),
+    otp_service: OTPService = Depends(),
+    auth_service: AuthService = Depends(),
+):
+    saved = otp_service.get_otp(request.email, purpose="reset")
+    if saved is None:
+        raise HTTPException(status_code=400, detail="otp expired or not issued")
+    if saved != request.otp:
+        raise HTTPException(status_code=400, detail="invalid otp")
+
+    user = user_repo.get_user_by_email(request.email)
+    if user is None:      # 코드 발급 후 탈퇴한 경우
+        raise HTTPException(status_code=400, detail="invalid otp")
+
+    user.password = auth_service.hash_password(request.new_password)
+    user_repo.update_user(user)
+    otp_service.delete_otp(request.email, purpose="reset")
+
+    return {"message": "password changed"}

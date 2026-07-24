@@ -5,7 +5,7 @@
 OTP API 테스트
 
 2026-07-24
-이메일 발송 / 재발급 제한 반영
+이메일 발송 / 재발급 제한 반영/비번 재설정 테스트
 '''
 
 from unittest.mock import Mock
@@ -31,7 +31,7 @@ def test_create_otp(auth_client, current_user, mock_redis, mock_email_service):
 
 def test_create_otp_cooldown(auth_client, current_user, mock_redis, mock_email_service):
     current_user.is_verified = False
-    mock_redis.set.side_effect = [None]       # 제한 키가 이미 있는 상태
+    mock_redis.set.return_value = None        # 제한 키가 이미 있는 상태
 
     response = auth_client.post("/user/email/otp")
 
@@ -135,5 +135,6 @@ def test_otp_key_separated_by_purpose():
     """용도별로 키가 분리돼야 가입 코드로 비번을 못 바꾼다"""
     service = OTPService(redis=Mock(spec=Redis))
 
-    assert service._key("test@example.com") == "otp:signup:test@example.com"
-    assert service._cooldown_key("test@example.com") == "otp:cooldown:signup:test@example.com"
+    assert service._key("a@b.com", "signup") == "otp:signup:a@b.com"
+    assert service._key("a@b.com", "reset") == "otp:reset:a@b.com"
+    assert service._key("a@b.com", "signup") != service._key("a@b.com", "reset")
