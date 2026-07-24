@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>회원가입 · blog</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <header>
+        <div class="container">
+            <a href="/" class="logo">blog</a>
+            <nav></nav>
+        </div>
+    </header>
+
+    <main class="container">
+        <!-- 1단계: 가입 -->
+        <section id="step-signup">
+            <h1>회원가입</h1>
+            <form id="signup-form">
+                <div class="field">
+                    <label for="email">이메일</label>
+                    <input type="email" id="email" required autocomplete="email">
+                </div>
+                <div class="field">
+                    <label for="nickname">닉네임</label>
+                    <input type="text" id="nickname" required minlength="2" maxlength="20"
+                        autocomplete="nickname">
+                </div>
+                <div class="field">
+                    <label for="password">비밀번호 (8자 이상)</label>
+                    <input type="password" id="password" required minlength="8" maxlength="72"
+                        autocomplete="new-password">
+                </div>
+                <p class="error" id="signup-error"></p>
+                <button type="submit" class="primary" id="signup-submit">가입</button>
+            </form>
+            <p class="hint">이미 계정이 있으신가요? <a href="/login">로그인</a></p>
+        </section>
+
+        <!-- 2단계: 이메일 인증 -->
+        <section id="step-verify" hidden>
+            <h1>이메일 인증</h1>
+            <p class="notice" id="verify-notice"></p>
+            <form id="verify-form">
+                <div class="field">
+                    <label for="otp">인증 코드 (6자리)</label>
+                    <input type="text" id="otp" class="code" required
+                        inputmode="numeric" pattern="[0-9]{6}" maxlength="6"
+                        autocomplete="one-time-code">
+                </div>
+                <p class="error" id="verify-error"></p>
+                <button type="submit" class="primary" id="verify-submit">인증</button>
+            </form>
+            <p class="hint">
+                메일이 오지 않았나요?
+                <a href="#" id="resend">코드 다시 보내기</a>
+                (1분에 한 번)
+            </p>
+        </section>
+
+        <!-- 3단계: 완료 -->
+        <section id="step-done" hidden>
+            <h1>가입 완료</h1>
+            <p class="notice">이메일 인증이 끝났습니다. 이제 글과 댓글을 쓸 수 있습니다.</p>
+            <p class="hint"><a href="/">글 목록으로</a></p>
+        </section>
+    </main>
+
+    <script src="/js/api.js"></script>
+    <script src="/js/auth.js"></script>
+    <script src="/js/signup.js"></script>
+</body>
+</html>
