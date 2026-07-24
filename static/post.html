@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>blog</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <header>
+        <div class="container">
+            <a href="/" class="logo">blog</a>
+            <nav></nav>
+        </div>
+    </header>
+
+    <main class="container">
+        <article id="post" hidden>
+            <div class="post-header">
+                <h1 id="title"></h1>
+                <div class="post-head-row">
+                    <div class="meta" id="meta"></div>
+                    <div class="actions" id="post-actions" hidden>
+                        <a class="ghost-btn" id="edit-link">수정</a>
+                        <button class="ghost-btn danger" id="delete-btn">삭제</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="post-body" id="contents"></div>
+            <div class="post-images" id="images"></div>
+
+            <section class="comment-section">
+                <p class="comment-count" id="comment-count"></p>
+                <ul class="comment-list" id="comment-list"></ul>
+
+                <form id="comment-form" class="wide" hidden>
+                    <div class="field">
+                        <label for="comment-input">댓글</label>
+                        <textarea id="comment-input" required></textarea>
+                    </div>
+                    <p class="error" id="comment-error"></p>
+                    <button type="submit" class="primary" id="comment-submit">등록</button>
+                </form>
+                <p class="hint" id="comment-guard" hidden></p>
+            </section>
+        </article>
+
+        <p class="empty" id="status">불러오는 중…</p>
+    </main>
+
+    <script src="/js/api.js"></script>
+    <script src="/js/auth.js"></script>
+    <script src="/js/post.js"></script>
+</body>
+</html>

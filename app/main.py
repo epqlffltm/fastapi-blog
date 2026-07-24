@@ -47,7 +47,7 @@ async def health_check():
 
 
 # 확장자 없는 경로를 각 html에 연결 (StaticFiles는 .html을 자동으로 붙이지 않는다)
-PAGES = ["login", "signup", "reset", "write", "post"]
+PAGES = ["login", "signup", "reset", "write", "edit", "post"]
 
 for _page in PAGES:
     def _make_page_route(name: str):

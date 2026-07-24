@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>글쓰기 · blog</title>
+    <title>글 수정 · blog</title>
     <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
@@ -15,13 +15,9 @@
     </header>
 
     <main class="container">
-        <h1>글쓰기</h1>
+        <h1>글 수정</h1>
 
-        <form id="write-form" class="wide" hidden>
-            <div class="field">
-                <label for="category">분류</label>
-                <select id="category" required></select>
-            </div>
+        <form id="edit-form" class="wide" hidden>
             <div class="field">
                 <label for="title">제목</label>
                 <input type="text" id="title" required maxlength="200">
@@ -30,12 +26,8 @@
                 <label for="contents">본문</label>
                 <textarea id="contents" required></textarea>
             </div>
-            <div class="field">
-                <label for="images">이미지 주소 (한 줄에 하나, 선택)</label>
-                <textarea id="images" placeholder="https://example.com/a.jpg"></textarea>
-            </div>
             <p class="error" id="error"></p>
-            <button type="submit" class="primary" id="submit">등록</button>
+            <button type="submit" class="primary" id="submit">저장</button>
         </form>
 
         <p class="empty" id="guard">확인 중…</p>
@@ -44,6 +36,6 @@
     <script src="/js/api.js"></script>
     <script src="/js/auth.js"></script>
     <script src="/js/post-form.js"></script>
-    <script src="/js/write.js"></script>
+    <script src="/js/edit.js"></script>
 </body>
 </html>

@@ -44,6 +44,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 
 body {
     margin: 0;
@@ -271,6 +272,7 @@ h1 {
     border-radius: 6px;
     font: inherit;
     font-size: 12px;
+    text-decoration: none;    /* a 태그로 쓸 때 밑줄 제거 */
     cursor: pointer;
 }
 
@@ -524,3 +526,12 @@ select:focus { border-color: var(--accent); }
         transition-duration: 0.01ms !important;
     }
 }
+
+/* 제목 아래 한 줄에 메타와 수정·삭제를 양쪽으로 */
+.post-head-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+* { box-sizing: border-box; }
