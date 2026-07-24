@@ -15,12 +15,22 @@ nickname → user_id FK 전환
 2026-07-24
 분류(categories) 테이블 추가
 images → uploads (업로드 파일 기록) 전환, 본문 썸네일
+대댓글 (parent_id 자기참조 FK, 1단계)
+회원 등급 (role)
 '''
 
+from enum import StrEnum
 from sqlalchemy import ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime, timezone
 from .connection import Base    # connection의 Base 재사용 (새로 만들지 않음)
+
+
+class UserRole(StrEnum):
+    # 값을 문자열로 저장한다. 정수로 두면 나중에 등급이 늘 때
+    # 순서를 비집고 넣어야 하고, DB를 눈으로 볼 때도 뜻이 안 보인다
+    ADMIN = "admin"      # 글 작성 / 분류 관리 / 등급 변경
+    MEMBER = "member"    # 댓글만
 
 
 class Post(Base):
@@ -63,6 +73,11 @@ class Comment(Base):
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     post_id: Mapped[int] = mapped_column(ForeignKey("posts.id"))
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    # 자기 테이블을 가리킨다. None 이면 원댓글, 값이 있으면 그 댓글의 답글.
+    # 깊이 1 제한은 DB가 아니라 핸들러가 지킨다 (답글에 답글을 막는다)
+    parent_id: Mapped[int | None] = mapped_column(
+        ForeignKey("comments.id"), index=True, default=None
+    )
     created_at: Mapped[datetime]
     updated_at: Mapped[datetime]
     contents: Mapped[str]
@@ -72,7 +87,7 @@ class Comment(Base):
     user: Mapped["User"] = relationship(back_populates="comments", lazy="joined")
 
     def __repr__(self):
-        return f"Comment(id={self.id}, post_id={self.post_id})"
+        return f"Comment(id={self.id}, post_id={self.post_id}, parent_id={self.parent_id})"
 
     @classmethod
     def create(cls, request, post_id: int, user_id: int) -> "Comment":
@@ -80,6 +95,7 @@ class Comment(Base):
         return cls(
             post_id=post_id,
             user_id=user_id,
+            parent_id=request.parent_id,
             contents=request.contents,
             created_at=now,
             updated_at=now,
@@ -123,21 +139,28 @@ class User(Base):    # 회원 테이블
     password: Mapped[str] = mapped_column(String(256))
     nickname: Mapped[str] = mapped_column(String(64), unique=True)
     is_verified: Mapped[bool] = mapped_column(default=False)
+    role: Mapped[str] = mapped_column(String(16), default=UserRole.MEMBER)
     created_at: Mapped[datetime]
 
     posts: Mapped[list["Post"]] = relationship(back_populates="user")
     comments: Mapped[list["Comment"]] = relationship(back_populates="user")
 
     def __repr__(self):
-        return f"User(id={self.id}, email={self.email})"
+        return f"User(id={self.id}, email={self.email}, role={self.role})"
+
+    @property
+    def is_admin(self) -> bool:
+        return self.role == UserRole.ADMIN
 
     @classmethod
     def create(cls, email: str, hashed_password: str, nickname: str) -> "User":
         # 반드시 해싱된 비번을 받는다 (평문 저장 금지)
+        # 가입은 언제나 최하위 등급. 올리는 건 관리자만 할 수 있다
         return cls(
             email=email,
             password=hashed_password,
             nickname=nickname,
+            role=UserRole.MEMBER,
             created_at=datetime.now(timezone.utc),
         )
 
@@ -154,3 +177,11 @@ class Category(Base):    # 글 분류 (사이드바)
 
     def __repr__(self):
         return f"Category(id={self.id}, slug={self.slug})"
+
+    @classmethod
+    def create(cls, request) -> "Category":
+        return cls(
+            slug=request.slug,
+            name=request.name,
+            display_order=request.display_order,
+        )

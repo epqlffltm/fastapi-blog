@@ -5,14 +5,13 @@
 인증 의존성 (요청 헤더의 토큰 → User)
 
 2026-07-24
-인증된 유저 의존성 추가
-2026-07-24
 httpOnly 쿠키에서 토큰을 읽도록 변경
+등급 확인 의존성 추가
 '''
 
 import jwt
 from fastapi import Cookie, Depends, HTTPException
-from ..database.orm import User
+from ..database.orm import User, UserRole
 from ..database.repository import UserRepository
 from ..service.auth import AuthService
 
@@ -51,4 +50,14 @@ def get_verified_user(
 ) -> User:
     if not current_user.is_verified:
         raise HTTPException(status_code=403, detail="email not verified")
+    return current_user
+
+
+def get_admin_user(
+    current_user: User = Depends(get_verified_user),
+) -> User:
+    # 인증 → 이메일 확인 → 등급 순으로 걸러진다.
+    # 401(누구인지 모름)과 403(누구인지는 알지만 권한 없음)이 구분된다
+    if current_user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="admin only")
     return current_user

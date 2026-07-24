@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>관리 · blog</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <header>
+        <div class="container">
+            <a href="/" class="logo">blog</a>
+            <nav></nav>
+        </div>
+    </header>
+
+    <main class="container">
+        <div id="admin" hidden>
+            <h1>관리</h1>
+
+            <section class="admin-section">
+                <h2>분류 추가</h2>
+                <form id="category-form">
+                    <div class="field">
+                        <label for="slug">주소 (영소문자·숫자·하이픈)</label>
+                        <input type="text" id="slug" required pattern="[a-z0-9\-]+"
+                               maxlength="32" placeholder="book">
+                    </div>
+                    <div class="field">
+                        <label for="name">표시 이름</label>
+                        <input type="text" id="name" required maxlength="32" placeholder="독서">
+                    </div>
+                    <div class="field">
+                        <label for="order">정렬 순서</label>
+                        <input type="number" id="order" value="0" min="0" max="999">
+                    </div>
+                    <p class="error" id="category-error"></p>
+                    <button type="submit" class="primary" id="category-submit">추가</button>
+                </form>
+
+                <ul class="category-list admin-categories" id="category-list"></ul>
+            </section>
+
+            <section class="admin-section">
+                <h2>회원 등급</h2>
+                <p class="error" id="user-error"></p>
+                <table class="user-table">
+                    <thead>
+                        <tr>
+                            <th>닉네임</th>
+                            <th>이메일</th>
+                            <th>인증</th>
+                            <th>등급</th>
+                        </tr>
+                    </thead>
+                    <tbody id="user-body"></tbody>
+                </table>
+            </section>
+        </div>
+
+        <p class="empty" id="guard">확인 중…</p>
+    </main>
+
+    <script src="/js/api.js"></script>
+    <script src="/js/auth.js"></script>
+    <script src="/js/admin.js"></script>
+</body>
+</html>

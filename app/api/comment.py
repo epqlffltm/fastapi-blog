@@ -10,6 +10,7 @@ repository 패턴 적용
 
 2026-07-24
 댓글 작성에 이메일 인증 요구
+대댓글 (1단계)
 '''
 
 from fastapi import APIRouter, Depends, HTTPException, Body
@@ -18,6 +19,7 @@ from ..database.repository import PostRepository, CommentRepository
 from ..database.orm import Comment, User
 from ..schema.request import CommentCreate
 from ..schema.response import PostDetailSchema
+from ..service.comment import visible_comments
 from .dependency import get_current_user, get_verified_user
 
 router = APIRouter(tags=["comment"])
@@ -35,6 +37,15 @@ def create_comment_handler(
     if post is None:
         raise HTTPException(status_code=404, detail="post not found")
 
+    if request.parent_id is not None:
+        parent = comment_repo.get_comment_by_id(request.parent_id)
+        if parent is None or parent.post_id != post_id:
+            # 다른 글의 댓글에 답글을 달 수 없다
+            raise HTTPException(status_code=400, detail="parent comment not found")
+        if parent.parent_id is not None:
+            # 답글의 답글은 받지 않는다 (깊이 1)
+            raise HTTPException(status_code=400, detail="cannot reply to a reply")
+
     comment = Comment.create(
         request=request, post_id=post_id, user_id=current_user.id
     )
@@ -42,7 +53,7 @@ def create_comment_handler(
 
     # 새 댓글 반영된 글 다시 읽기
     post = post_repo.get_post_by_id(post_id)
-    post.comments = [c for c in post.comments if not c.is_deleted]
+    post.comments = visible_comments(post.comments)
     return post
 
 
@@ -77,6 +88,7 @@ def delete_comment_handler(
     if comment.user_id != current_user.id:      # 내 댓글만 삭제 가능
         raise HTTPException(status_code=403, detail="not your comment")
 
+    # 소프트삭제. 답글이 달려 있으면 자리표시자로 남는다
     comment.is_deleted = True
     comment.updated_at = datetime.now(timezone.utc)
     comment_repo.update(comment)

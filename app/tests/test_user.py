@@ -5,24 +5,26 @@
 회원 API 테스트
 
 2026-07-24
-쿠키 방식으로 변경
+httpOnly 쿠키 로그인 / 로그아웃
+등급 반영
 '''
 
 import jwt
 import pytest
 from datetime import datetime, timedelta, timezone
 from app.database.connection import settings
-from app.database.orm import User
+from app.database.orm import User, UserRole
 from app.service.auth import AuthService
 
 
-def _make_user(id=1, email="test@example.com", nickname="tester"):
+def _make_user(id=1, email="test@example.com", nickname="tester", role=UserRole.MEMBER):
     return User(
         id=id,
         email=email,
         password="$2b$12$fakehashedpassword",
         nickname=nickname,
         is_verified=False,
+        role=role,
         created_at=datetime(2026, 7, 23, tzinfo=timezone.utc),
     )
 
@@ -44,6 +46,7 @@ def test_sign_up(client, mock_user_repo):
     assert data["email"] == "test@example.com"
     assert data["nickname"] == "tester"
     assert data["is_verified"] is False
+    assert data["role"] == "member"
     assert "password" not in data          # 비번이 응답에 새면 안 된다
     mock_user_repo.save_user.assert_called_once()
 
@@ -119,7 +122,8 @@ def test_hash_is_salted():
     assert h1 != h2
     assert service.verify_password("password123", h1) is True
     assert service.verify_password("password123", h2) is True
-    
+
+
 # ---------- 로그인 ----------
 
 def test_log_in(client, mock_user_repo):
@@ -135,6 +139,7 @@ def test_log_in(client, mock_user_repo):
 
     assert response.status_code == 200
     assert response.json()["nickname"] == "tester"
+    assert response.json()["role"] == "member"
     assert "password" not in response.json()
     assert "access_token" not in response.text      # 토큰이 본문에 새면 안 된다
 
@@ -196,6 +201,7 @@ def test_get_me(client, mock_user_repo):
     assert response.status_code == 200
     data = response.json()
     assert data["email"] == "test@example.com"
+    assert data["role"] == "member"
     assert "password" not in data
 
 
@@ -212,36 +218,8 @@ def test_get_me_invalid_cookie(client, mock_user_repo):
 
     assert response.status_code == 401
     assert response.json()["detail"] == "invalid token"
-    
-'''
-# ---------- 내 정보 (토큰 인증) ----------
-
-def test_get_me(client, mock_user_repo):
-    user = _make_user()
-    mock_user_repo.get_user_by_id.return_value = user
-    token = AuthService().create_jwt(user.id)
-
-    response = client.get("/user/me", headers={"Authorization": f"Bearer {token}"})
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["email"] == "test@example.com"
-    assert "password" not in data
 
 
-def test_get_me_without_token(client, mock_user_repo):
-    response = client.get("/user/me")
-
-    assert response.status_code == 401
-
-
-def test_get_me_invalid_token(client, mock_user_repo):
-    response = client.get("/user/me", headers={"Authorization": "Bearer garbage"})
-
-    assert response.status_code == 401
-    assert response.json()["detail"] == "invalid token"
-
-'''
 # ---------- JWT 자체 테스트 ----------
 
 def test_jwt_roundtrip():
@@ -267,7 +245,7 @@ def test_decode_tampered_token():
     service = AuthService()
     forged = jwt.encode(
         {"sub": "1", "exp": datetime.now(timezone.utc) + timedelta(days=1)},
-        "wrong-secret-key",      # 다른 키로 서명
+        "wrong-secret-key-that-is-long-enough-to-avoid-a-warning",   # 다른 키로 서명
         algorithm=settings.jwt_algorithm,
     )
 

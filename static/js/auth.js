@@ -9,6 +9,10 @@ async function getCurrentUser() {
     }
 }
 
+function isAdmin(user) {
+    return user !== null && user.role === "admin";
+}
+
 async function renderHeader() {
     const nav = document.querySelector("header nav");
     if (!nav) return null;
@@ -17,9 +21,18 @@ async function renderHeader() {
     nav.replaceChildren();
 
     if (user) {
-        const write = document.createElement("a");
-        write.href = "/write";
-        write.textContent = "글쓰기";
+        // 글쓰기·관리는 관리자에게만 보인다. 실제 차단은 서버가 한다
+        if (isAdmin(user)) {
+            const write = document.createElement("a");
+            write.href = "/write";
+            write.textContent = "글쓰기";
+
+            const admin = document.createElement("a");
+            admin.href = "/admin";
+            admin.textContent = "관리";
+
+            nav.append(write, admin);
+        }
 
         const name = document.createElement("span");
         name.className = "who";
@@ -32,7 +45,7 @@ async function renderHeader() {
             location.href = "/";
         });
 
-        nav.append(write, name, logout);
+        nav.append(name, logout);
     } else {
         const login = document.createElement("a");
         login.href = "/login";

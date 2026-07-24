@@ -9,9 +9,10 @@ repository 패턴 적용
 인증 연동 + 권한 검사
 
 2026-07-24
-글 작성에 이메일 인증 요구
 분류 필터 / 분류 검증
 본문 마크다운화 + 썸네일 추출
+대댓글 표시 규칙 적용
+글 작성은 관리자만
 '''
 
 from fastapi import APIRouter, Depends, HTTPException, Body
@@ -24,8 +25,9 @@ from ..schema.response import (
     ListPostSchema, PostListItemSchema, PostDetailSchema,
     UserBriefSchema, CategorySchema,
 )
+from ..service.comment import visible_comments
 from ..service.markdown import extract_first_image
-from .dependency import get_current_user, get_verified_user
+from .dependency import get_current_user, get_admin_user
 
 router = APIRouter(tags=["post"])
 
@@ -73,15 +75,15 @@ def get_page_handler(
     if post is None:
         raise HTTPException(status_code=404, detail="post not found")
 
-    # 삭제 안 된 댓글만 남기기 (relationship은 삭제 여부를 안 가리므로 직접 필터)
-    post.comments = [c for c in post.comments if not c.is_deleted]
+    # relationship 은 삭제 여부를 안 가리므로 표시 규칙을 직접 적용한다
+    post.comments = visible_comments(post.comments)
     return post
 
 
 @router.post("/page", status_code=201, response_model=PostDetailSchema)#본문 쓰기
 def create_post_handler(
     request: PostCreate,
-    current_user: User = Depends(get_verified_user),   # 이메일 인증된 회원만
+    current_user: User = Depends(get_admin_user),   # 글은 관리자만
     post_repo: PostRepository = Depends(),
     category_repo: CategoryRepository = Depends(),
 ):
@@ -100,6 +102,7 @@ def update_post_handler(
     id: int,
     title: Optional[str] = Body(None, embed=True),
     contents: Optional[str] = Body(None, embed=True),
+    # 등급이 내려가도 자기가 쓴 글은 정리할 수 있어야 하므로 소유권만 본다
     current_user: User = Depends(get_current_user),
     post_repo: PostRepository = Depends(),
 ):
@@ -117,7 +120,7 @@ def update_post_handler(
     post.updated_at = datetime.now(timezone.utc)
     post = post_repo.update(post)
 
-    post.comments = [c for c in post.comments if not c.is_deleted]
+    post.comments = visible_comments(post.comments)
     return post
 
 

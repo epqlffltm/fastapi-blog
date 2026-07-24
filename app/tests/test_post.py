@@ -10,16 +10,17 @@
 2026-07-24
 분류 반영
 이미지 제거 / 썸네일 반영
+글 작성은 관리자만
 '''
 
 from datetime import datetime, timezone
-from app.database.orm import Post, User, Category
+from app.database.orm import Post, User, Category, UserRole
 
 
 def _make_user(id=1, nickname="tester"):
     return User(
         id=id, email=f"{nickname}@example.com", password="hash",
-        nickname=nickname, is_verified=True,
+        nickname=nickname, is_verified=True, role=UserRole.ADMIN,
         created_at=datetime(2026, 7, 23, tzinfo=timezone.utc),
     )
 
@@ -143,11 +144,11 @@ def test_get_page_not_found(client, mock_post_repo):
 
 # ---------- 생성 ----------
 
-def test_create_post(auth_client, mock_post_repo, mock_category_repo):
+def test_create_post(admin_client, mock_post_repo, mock_category_repo):
     mock_category_repo.get_category_by_id.return_value = _make_category()
     mock_post_repo.save.return_value = _make_post(id=10, title="새 글")
 
-    response = auth_client.post(
+    response = admin_client.post(
         "/page",
         json={"title": "새 글", "contents": "새 본문", "category_id": 1},
     )
@@ -159,12 +160,12 @@ def test_create_post(auth_client, mock_post_repo, mock_category_repo):
     mock_post_repo.save.assert_called_once()
 
 
-def test_create_post_extracts_thumbnail(auth_client, mock_post_repo, mock_category_repo):
+def test_create_post_extracts_thumbnail(admin_client, mock_post_repo, mock_category_repo):
     """본문 첫 이미지가 썸네일로 저장되는지"""
     mock_category_repo.get_category_by_id.return_value = _make_category()
     mock_post_repo.save.return_value = _make_post(id=10)   # 응답 변환용
 
-    auth_client.post(
+    admin_client.post(
         "/page",
         json={
             "title": "글",
@@ -178,15 +179,26 @@ def test_create_post_extracts_thumbnail(auth_client, mock_post_repo, mock_catego
     assert saved.thumbnail_url == "/img/first.png"
 
 
-def test_create_post_unknown_category(auth_client, mock_post_repo, mock_category_repo):
+def test_create_post_unknown_category(admin_client, mock_post_repo, mock_category_repo):
     mock_category_repo.get_category_by_id.return_value = None
 
-    response = auth_client.post(
+    response = admin_client.post(
         "/page",
         json={"title": "글", "contents": "본문", "category_id": 999},
     )
 
     assert response.status_code == 400
+    mock_post_repo.save.assert_not_called()
+
+
+def test_create_post_as_member(auth_client, mock_post_repo, mock_category_repo):
+    """일반 회원은 글을 쓸 수 없다 (댓글만)"""
+    response = auth_client.post(
+        "/page", json={"title": "글", "contents": "본문", "category_id": 1}
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "admin only"
     mock_post_repo.save.assert_not_called()
 
 
@@ -200,9 +212,9 @@ def test_create_post_without_token(client, mock_post_repo, mock_category_repo):
     mock_post_repo.save.assert_not_called()
 
 
-def test_create_post_missing_field(auth_client, mock_post_repo, mock_category_repo):
+def test_create_post_missing_field(admin_client, mock_post_repo, mock_category_repo):
     """필수 필드 빠지면 422"""
-    response = auth_client.post("/page", json={"title": "제목만"})
+    response = admin_client.post("/page", json={"title": "제목만"})
 
     assert response.status_code == 422
 

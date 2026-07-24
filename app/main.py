@@ -22,6 +22,7 @@ user 라우터 추가
 2026-07-24
 정적 파일 서빙 (static)
 category / upload 라우터 추가
+관리 페이지
 '''
 
 from pathlib import Path
@@ -48,7 +49,7 @@ async def health_check():
 
 
 # 확장자 없는 경로를 각 html에 연결 (StaticFiles는 .html을 자동으로 붙이지 않는다)
-PAGES = ["login", "signup", "reset", "write", "edit", "post"]
+PAGES = ["login", "signup", "reset", "write", "edit", "post", "admin"]
 
 for _page in PAGES:
     def _make_page_route(name: str):

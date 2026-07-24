@@ -13,6 +13,7 @@ UserRepository 추가
 2026-07-24
 CategoryRepository 추가 / 목록에 분류 필터
 UploadRepository 추가 (save_with_images 제거)
+회원 목록 / 분류 저장
 '''
 
 from fastapi import Depends
@@ -88,6 +89,9 @@ class UserRepository:
     def __init__(self, session: Session = Depends(get_db)):
         self.session = session
 
+    def get_users(self) -> list[User]:
+        return list(self.session.scalars(select(User).order_by(User.id)).all())
+
     def get_user_by_email(self, email: str) -> User | None:
         return self.session.scalar(select(User).where(User.email == email))
 
@@ -130,8 +134,17 @@ class CategoryRepository:
     def get_category_by_slug(self, slug: str) -> Category | None:
         return self.session.scalar(select(Category).where(Category.slug == slug))
 
+    def get_category_by_name(self, name: str) -> Category | None:
+        return self.session.scalar(select(Category).where(Category.name == name))
+
     def get_category_by_id(self, id: int) -> Category | None:
         return self.session.scalar(select(Category).where(Category.id == id))
+
+    def save(self, category: Category) -> Category:
+        self.session.add(category)
+        self.session.commit()
+        self.session.refresh(category)
+        return category
 
 
 class UploadRepository:

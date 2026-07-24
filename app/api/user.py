@@ -2,25 +2,27 @@
 
 '''
 2026-07-23
-회원 관련 라우터 (회원가입)
-로그인 + 내 정보
+회원 관련 라우터 (회원가입, 로그인, 내 정보)
 
 2026-07-24
-엔드포인트 2개 추가
-create_otp_handler 교체
+OTP 발급/검증, 비밀번호 재설정
+httpOnly 쿠키 로그인 / 로그아웃
+회원 목록 · 등급 변경 (관리자)
 '''
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
-from ..database.repository import UserRepository
-from ..database.orm import User
-from ..service.auth import AuthService
-from ..schema.response import UserSchema
-from .dependency import get_current_user, COOKIE_NAME
-from ..schema.request import SignUpRequest, LogInRequest, VerifyOTPRequest, ResetPasswordRequest, ResetPasswordVerifyRequest
-from ..service.otp import OTPService
-from ..service.email import EmailService
 from ..database.connection import settings
-
+from ..database.orm import User
+from ..database.repository import UserRepository
+from ..schema.request import (
+    SignUpRequest, LogInRequest, VerifyOTPRequest,
+    ResetPasswordRequest, ResetPasswordVerifyRequest, RoleUpdateRequest,
+)
+from ..schema.response import ListUserSchema, UserSchema
+from ..service.auth import AuthService
+from ..service.email import EmailService
+from ..service.otp import OTPService
+from .dependency import get_current_user, get_admin_user, COOKIE_NAME
 
 router = APIRouter(prefix="/user", tags=["user"])
 
@@ -48,6 +50,7 @@ def sign_up_handler(
     user = user_repo.save_user(user)
     return user
 
+
 @router.post("/log-in", status_code=200, response_model=UserSchema)#로그인
 def log_in_handler(
     request: LogInRequest,
@@ -71,7 +74,7 @@ def log_in_handler(
         max_age=settings.cookie_max_age,
         path="/",
     )
-    return user       # 프론트가 닉네임 등을 바로 쓸 수 있게 회원 정보를 반환
+    return user       # 프론트가 닉네임·등급을 바로 쓸 수 있게 회원 정보를 반환
 
 
 @router.post("/log-out", status_code=200)#로그아웃
@@ -92,6 +95,34 @@ def get_me_handler(
     current_user: User = Depends(get_current_user),
 ):
     return current_user
+
+
+@router.get("/list", status_code=200, response_model=ListUserSchema)#회원 목록 (관리자)
+def get_users_handler(
+    current_user: User = Depends(get_admin_user),
+    user_repo: UserRepository = Depends(),
+):
+    return ListUserSchema(users=user_repo.get_users())
+
+
+@router.patch("/{id}/role", status_code=200, response_model=UserSchema)#등급 변경 (관리자)
+def update_role_handler(
+    id: int,
+    request: RoleUpdateRequest,
+    current_user: User = Depends(get_admin_user),
+    user_repo: UserRepository = Depends(),
+):
+    # 자기 등급은 못 바꾼다. 마지막 관리자가 스스로 강등하면 아무도 되돌릴 수 없다
+    if id == current_user.id:
+        raise HTTPException(status_code=400, detail="cannot change your own role")
+
+    user = user_repo.get_user_by_id(id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="user not found")
+
+    user.role = request.role
+    return user_repo.update_user(user)
+
 
 @router.post("/email/otp", status_code=200)#인증코드 발급
 def create_otp_handler(
@@ -132,6 +163,7 @@ def verify_otp_handler(
     otp_service.delete_otp(current_user.email, purpose="signup")   # 1회용이므로 즉시 폐기
 
     return current_user
+
 
 @router.post("/password/reset", status_code=200)#비번 재설정 코드 발송
 def reset_password_handler(

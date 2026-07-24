@@ -11,7 +11,7 @@ const postId = new URLSearchParams(location.search).get("id");
 let editor = null;
 
 async function init() {
-    const user = await requireVerifiedUser(guard);
+    const user = await requireAdminUser(guard);
     if (!user) return;
 
     if (!postId) {

@@ -30,6 +30,25 @@ async function requireVerifiedUser(guardEl) {
     return user;
 }
 
+// 관리자 확인. 글쓰기·수정 화면이 쓴다
+async function requireAdminUser(guardEl) {
+    const user = await renderHeader();
+
+    if (!user) {
+        showGuard(guardEl, "로그인이 필요합니다.", "/login", "로그인하기");
+        return null;
+    }
+    if (!user.is_verified) {
+        showGuard(guardEl, "이메일 인증이 필요합니다.", "/signup", "인증하기");
+        return null;
+    }
+    if (!isAdmin(user)) {
+        guardEl.textContent = "글은 관리자만 쓸 수 있습니다.";
+        return null;
+    }
+    return user;
+}
+
 // 분류 셀렉트 채우기 (작성에서만 쓴다 — PATCH는 분류를 바꾸지 않는다)
 async function loadCategoryOptions(selectEl) {
     const data = await api.get("/categories");
