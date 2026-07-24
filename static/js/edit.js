@@ -1,14 +1,14 @@
 // 2026-07-24 글 수정 (공통 조각은 post-form.js)
-// 분류·이미지는 백엔드 PATCH 가 받지 않으므로 제목·본문만 다룬다
+// 분류는 백엔드 PATCH 가 받지 않으므로 제목·본문만 다룬다
 
 const form = document.getElementById("edit-form");
 const guard = document.getElementById("guard");
 const errorEl = document.getElementById("error");
 const submitBtn = document.getElementById("submit");
 const titleEl = document.getElementById("title");
-const contentsEl = document.getElementById("contents");
 
 const postId = new URLSearchParams(location.search).get("id");
+let editor = null;
 
 async function init() {
     const user = await requireVerifiedUser(guard);
@@ -34,16 +34,23 @@ async function init() {
     }
 
     titleEl.value = post.title;
-    contentsEl.value = post.contents;
 
     guard.hidden = true;
     form.hidden = false;
+
+    // 저장돼 있던 마크다운을 그대로 넣으면 위지윅이 알아서 렌더한다
+    editor = createEditor(document.getElementById("editor"), post.contents);
 }
 
 bindSubmit(form, submitBtn, errorEl, async () => {
+    const contents = editor.getMarkdown();
+    if (!contents.trim()) {
+        throw new Error("본문을 입력해 주세요.");
+    }
+
     await api.patch(`/page/${postId}`, {
         title: titleEl.value,
-        contents: contentsEl.value,
+        contents,
     });
     location.href = `/post?id=${postId}`;
 });

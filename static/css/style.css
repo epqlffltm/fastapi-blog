@@ -44,6 +44,10 @@
 }
 
 * { box-sizing: border-box; }
+
+/* hidden 속성은 UA 스타일시트의 display:none 으로 동작하는데,
+   작성자 스타일(form{display:flex} 등)이 origin 우선순위로 그걸 덮어쓴다.
+   명시적으로 되돌려 hidden 이 항상 이기게 한다 */
 [hidden] { display: none !important; }
 
 body {
@@ -210,6 +214,9 @@ nav .who:hover { color: var(--text-faint); }
 
 .post-list h2 a:hover { color: var(--accent); }
 
+/* 이미지가 있는 글은 올렸을 때 미리보기가 뜬다는 신호를 준다 */
+.post-list li.has-preview:hover { background: var(--bg-panel); }
+
 /* 날짜·개수는 기계가 세는 값 → 모노 */
 .meta {
     color: var(--text-faint);
@@ -222,6 +229,27 @@ nav .who:hover { color: var(--text-faint); }
 .category-tag {
     color: var(--text-dim);
     font-family: var(--ui);
+}
+
+
+/* ── 썸네일 미리보기 ────────────────────────────────────────
+   커서를 따라다니므로 문서 흐름에서 빼고(fixed) 클릭을 가로채지 않게 한다 */
+
+.hover-preview {
+    position: fixed;
+    z-index: 100;
+    padding: 4px;
+    background: var(--bg-panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    pointer-events: none;   /* 미리보기가 커서를 가리면 mouseleave 가 엉킨다 */
+}
+
+.hover-preview img {
+    display: block;
+    max-width: 220px;
+    max-height: 220px;
+    border-radius: 4px;
 }
 
 
@@ -239,23 +267,15 @@ h1 {
     border-bottom: 1px solid var(--line-soft);
 }
 
-.post-body {
-    padding: 20px 0;
-    white-space: pre-wrap;   /* 작성자가 넣은 줄바꿈을 살린다 */
-}
-
-.post-images {
+/* 제목 아래 한 줄에 메타와 수정·삭제를 양쪽으로 */
+.post-head-row {
     display: flex;
-    flex-direction: column;
-    gap: 10px;
-    margin: 12px 0;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
 }
 
-.post-images img {
-    max-width: 100%;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-}
+.post-body { padding: 20px 0; }
 
 /* 글·댓글의 수정/삭제 — 평소엔 조용히, 필요할 때만 보이게 */
 .actions {
@@ -381,7 +401,7 @@ input::placeholder,
 textarea::placeholder { color: var(--text-faint); }
 
 textarea {
-    min-height: 220px;
+    min-height: 120px;
     line-height: 1.7;
     resize: vertical;
 }
@@ -425,6 +445,20 @@ select:disabled {
 }
 
 
+/* ── 에디터 · 뷰어 (Toast UI) ────────────────────────────────
+   라이브러리 자체 다크 테마를 쓰고, 테두리만 우리 선에 맞춘다.
+   내부 구조까지 덮어쓰면 라이브러리 버전이 오를 때 깨진다 */
+
+.toastui-editor-defaultUI {
+    border-color: var(--line) !important;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+/* 뷰어의 위아래 여백은 .post-body 가 이미 갖고 있다 */
+.toastui-editor-contents { font-size: 14px; }
+
+
 /* ── 메시지 ─────────────────────────────────────────────── */
 
 /* 에러는 뭐가 잘못됐는지를 말해야 한다. 자리를 미리 잡아 레이아웃이 튀지 않게 */
@@ -448,7 +482,7 @@ select:disabled {
 
 /* 보조 안내문 (링크 줄 등) */
 .hint {
-    margin-top: 18px;
+    margin-top: 8px;
     color: var(--text-faint);
     font-size: 12.5px;
 }
@@ -514,6 +548,9 @@ select:focus { border-color: var(--accent); }
 
     /* 터치 기기엔 hover 가 없다 → 댓글 액션을 항상 보이게 */
     .comment-list .actions { opacity: 1; }
+
+    /* 커서가 없으므로 미리보기도 의미가 없다 */
+    .hover-preview { display: none !important; }
 }
 
 
@@ -526,12 +563,3 @@ select:focus { border-color: var(--accent); }
         transition-duration: 0.01ms !important;
     }
 }
-
-/* 제목 아래 한 줄에 메타와 수정·삭제를 양쪽으로 */
-.post-head-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-}
-* { box-sizing: border-box; }

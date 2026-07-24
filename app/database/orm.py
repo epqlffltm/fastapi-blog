@@ -13,7 +13,8 @@ create classmethod 추가 (post api)
 nickname → user_id FK 전환
 
 2026-07-24
-사이드 바 추가
+분류(categories) 테이블 추가
+images → uploads (업로드 파일 기록) 전환, 본문 썸네일
 '''
 
 from sqlalchemy import ForeignKey, String
@@ -31,14 +32,14 @@ class Post(Base):
     created_at: Mapped[datetime]
     updated_at: Mapped[datetime]
     title: Mapped[str]
-    contents: Mapped[str]
+    contents: Mapped[str]                              # 마크다운 원문
+    thumbnail_url: Mapped[str | None] = mapped_column(String(512), default=None)
     is_deleted: Mapped[bool] = mapped_column(default=False)
 
     # N:1 이라 joined 로딩이 적합 (글 하나당 작성자·분류 하나)
     user: Mapped["User"] = relationship(back_populates="posts", lazy="joined")
     category: Mapped["Category"] = relationship(back_populates="posts", lazy="joined")
     comments: Mapped[list["Comment"]] = relationship(back_populates="post")
-    images: Mapped[list["Image"]] = relationship(back_populates="post")
 
     def __repr__(self):
         return f"Post(id={self.id}, title={self.title})"
@@ -85,25 +86,32 @@ class Comment(Base):
         )
 
 
-class Image(Base):
-    __tablename__ = "images"
+class Upload(Base):    # 업로드된 파일 기록 (본문 위치는 마크다운이 갖는다)
+    __tablename__ = "uploads"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    post_id: Mapped[int] = mapped_column(ForeignKey("posts.id"))
-    url: Mapped[str]
-    display_order: Mapped[int] = mapped_column(default=0)
-
-    post: Mapped["Post"] = relationship(back_populates="images")
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    filename: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    original_name: Mapped[str] = mapped_column(String(256))
+    content_type: Mapped[str] = mapped_column(String(64))
+    size: Mapped[int]
+    created_at: Mapped[datetime]
 
     def __repr__(self):
-        return f"Image(id={self.id}, post_id={self.post_id}, url={self.url})"
+        return f"Upload(id={self.id}, filename={self.filename})"
 
     @classmethod
-    def create(cls, url: str, post_id: int, display_order: int = 0) -> "Image":
+    def create(
+        cls, user_id: int, filename: str, original_name: str,
+        content_type: str, size: int,
+    ) -> "Upload":
         return cls(
-            url=url,
-            post_id=post_id,
-            display_order=display_order,
+            user_id=user_id,
+            filename=filename,
+            original_name=original_name,
+            content_type=content_type,
+            size=size,
+            created_at=datetime.now(timezone.utc),
         )
 
 
@@ -125,13 +133,15 @@ class User(Base):    # 회원 테이블
 
     @classmethod
     def create(cls, email: str, hashed_password: str, nickname: str) -> "User":
+        # 반드시 해싱된 비번을 받는다 (평문 저장 금지)
         return cls(
             email=email,
             password=hashed_password,
             nickname=nickname,
             created_at=datetime.now(timezone.utc),
         )
-        
+
+
 class Category(Base):    # 글 분류 (사이드바)
     __tablename__ = "categories"
 

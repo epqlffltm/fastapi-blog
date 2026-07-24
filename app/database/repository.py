@@ -9,17 +9,17 @@ DB 접근 계층 (repository)
 
 2026-07-23
 UserRepository 추가
-UserRepository에 메서드 추가
 
 2026-07-24
 CategoryRepository 추가 / 목록에 분류 필터
+UploadRepository 추가 (save_with_images 제거)
 '''
 
 from fastapi import Depends
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 from .connection import get_db
-from .orm import Post, Comment, Image, User, Category
+from .orm import Post, Comment, Upload, User, Category
 
 
 class PostRepository:
@@ -52,17 +52,6 @@ class PostRepository:
 
     def save(self, post: Post) -> Post:
         self.session.add(post)
-        self.session.commit()
-        self.session.refresh(post)
-        return post
-
-    def save_with_images(self, post: Post, image_urls: list[str]) -> Post:
-        # 글 저장 → id 확보 → 이미지 매달기 → 커밋
-        self.session.add(post)
-        self.session.flush()   # commit 전에 post.id 받기
-        for order, url in enumerate(image_urls):
-            image = Image.create(url=url, post_id=post.id, display_order=order)
-            self.session.add(image)
         self.session.commit()
         self.session.refresh(post)
         return post
@@ -143,3 +132,14 @@ class CategoryRepository:
 
     def get_category_by_id(self, id: int) -> Category | None:
         return self.session.scalar(select(Category).where(Category.id == id))
+
+
+class UploadRepository:
+    def __init__(self, session: Session = Depends(get_db)):
+        self.session = session
+
+    def save(self, upload: Upload) -> Upload:
+        self.session.add(upload)
+        self.session.commit()
+        self.session.refresh(upload)
+        return upload

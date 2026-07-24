@@ -41,12 +41,44 @@ async function loadCategoryOptions(selectEl) {
     }
 }
 
-// 여러 줄 입력 → 문자열 배열. 빈 줄과 앞뒤 공백은 버린다
-function parseImageUrls(text) {
-    return text
-        .split("\n")
-        .map((line) => line.trim())
-        .filter((line) => line.length > 0);
+// 에디터가 이미지를 붙여넣거나 드래그하면 이 훅이 불린다.
+// FormData 를 보낼 땐 Content-Type 을 직접 지정하면 안 된다 —
+// 브라우저가 multipart 경계 문자열을 붙여야 해서 api.js 를 쓰지 못한다
+async function uploadImage(blob, callback) {
+    const formData = new FormData();
+    formData.append("file", blob);
+
+    try {
+        const response = await fetch("/upload", {
+            method: "POST",
+            credentials: "include",
+            body: formData,
+        });
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data?.detail ?? `업로드 실패 (${response.status})`);
+        }
+        callback(data.url, blob.name ?? "");
+    } catch (err) {
+        alert(`이미지 업로드 실패: ${err.message}`);
+    }
+}
+
+// 위지윅으로 편집하고 마크다운으로 저장한다.
+// 저장 형식이 텍스트라 화면에 뿌릴 때의 위험이 줄고, 나중에 옮기기도 쉽다
+function createEditor(el, initialValue = "") {
+    return new toastui.Editor({
+        el,
+        height: "560px",
+        initialEditType: "wysiwyg",
+        previewStyle: "tab",       // 마크다운 모드로 바꿔도 화면을 반으로 쪼개지 않는다
+        initialValue,
+        theme: "dark",
+        language: "ko-KR",
+        usageStatistics: false,
+        hooks: { addImageBlobHook: uploadImage },
+    });
 }
 
 // 제출의 공통 골격: 기본 동작 차단, 중복 제출 방지, 에러 표시.

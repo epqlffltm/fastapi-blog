@@ -10,12 +10,14 @@
 2026-07-24
 시드 계정은 인증됨으로 생성
 분류(사이드바) 추가
+본문을 마크다운으로
 '''
 
 from datetime import datetime
 from .database.connection import SessionFactory
-from .database.orm import Post, Comment, Image, User, Category
+from .database.orm import Post, Comment, User, Category
 from .service.auth import AuthService
+from .service.markdown import extract_first_image
 
 
 # 분류 (slug: URL용 / name: 화면 표시용)
@@ -46,10 +48,6 @@ posts_data = [
             "updated_at": datetime.fromisoformat("2026-07-16T09:20:00+00:00"),
             "contents": "로그 수는 부족하진 않아"},
         ],
-        "images": [
-            {"url": "https://example.com/dnd1_a.jpg", "display_order": 0},
-            {"url": "https://example.com/dnd1_b.jpg", "display_order": 1},
-        ],
     },
     {
         "author": "gil",
@@ -72,24 +70,31 @@ posts_data = [
             "updated_at": datetime.fromisoformat("2026-07-16T10:50:00+00:00"),
             "contents": "바바리안, 찢고 죽인다"},
         ],
-        "images": [
-            {"url": "https://example.com/dnd2_a.jpg", "display_order": 0},
-        ],
     },
     {
         "author": "dong",
-        "category": "dnd",
+        "category": "dev",
         "created_at": datetime.fromisoformat("2026-07-16T14:15:00+00:00"),
         "updated_at": datetime.fromisoformat("2026-07-16T14:15:00+00:00"),
-        "title": "dnd 밈3",
-        "contents": "둥그런 선술집을 지으세요",
+        "title": "마크다운 확인용",
+        "contents": (
+            "## 코드 블록\n\n"
+            "```python\n"
+            "@router.get('/pages', status_code=200)\n"
+            "def get_pages_handler():\n"
+            "    ...\n"
+            "```\n\n"
+            "### 목록\n\n"
+            "- 위지윅으로 쓰고\n"
+            "- 마크다운으로 저장한다\n\n"
+            "> 인용문도 된다\n"
+        ),
         "comments": [
             {"author": "yoon",
             "created_at": datetime.fromisoformat("2026-07-16T14:25:00+00:00"),
             "updated_at": datetime.fromisoformat("2026-07-16T14:25:00+00:00"),
             "contents": "로그가 구석에서 비릿한 웃음을 짓지 못하도록"},
         ],
-        "images": [],
     },
 ]
 
@@ -120,17 +125,17 @@ def seed():
 
         session.flush()   # id 확보
 
-        # 3) 글/댓글/이미지
+        # 3) 글/댓글
         for pdata in posts_data:
             data = dict(pdata)
             comments_data = data.pop("comments")
-            images_data = data.pop("images")
             author = data.pop("author")
             category_slug = data.pop("category")
 
             post = Post(
                 user_id=nickname_to_user[author].id,
                 category_id=slug_to_category[category_slug].id,
+                thumbnail_url=extract_first_image(data["contents"]),
                 **data,
             )
             post.comments = [
@@ -142,7 +147,6 @@ def seed():
                 )
                 for c in comments_data
             ]
-            post.images = [Image(**img) for img in images_data]
             session.add(post)
 
         session.commit()

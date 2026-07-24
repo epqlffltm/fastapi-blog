@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     smtp_password: str = ""                 # 추가
     cookie_secure: bool = False    # 추가: 배포(HTTPS)에서 true
     cookie_max_age: int = 86400
+    cookie_max_age: int = 86400
+    upload_max_bytes: int = 5 * 1024 * 1024
 
 
 settings = Settings()

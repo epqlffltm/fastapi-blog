@@ -9,22 +9,24 @@
 
 2026-07-24
 이메일/미인증 fixture 추가
-분류 fixture 추가
+분류 / 업로드 fixture 추가
 '''
 
 import pytest
 from datetime import datetime, timezone
 from fastapi.testclient import TestClient
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 from redis import Redis
 from app.main import app
 from app.database.orm import User
 from app.database.repository import (
-    PostRepository, CommentRepository, UserRepository, CategoryRepository,
+    PostRepository, CommentRepository, UserRepository,
+    CategoryRepository, UploadRepository,
 )
 from app.database.cache import get_redis_client
 from app.api.dependency import get_current_user
 from app.service.email import EmailService
+from app.service.upload import UploadService
 
 
 @pytest.fixture
@@ -90,6 +92,23 @@ def mock_category_repo():
     repo = Mock(spec=CategoryRepository)
     app.dependency_overrides[CategoryRepository] = lambda: repo
     yield repo
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def mock_upload_repo():
+    repo = Mock(spec=UploadRepository)
+    app.dependency_overrides[UploadRepository] = lambda: repo
+    yield repo
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def mock_upload_service():
+    # save 가 async 이므로 AsyncMock
+    service = AsyncMock(spec=UploadService)
+    app.dependency_overrides[UploadService] = lambda: service
+    yield service
     app.dependency_overrides.clear()
 
 

@@ -11,6 +11,7 @@ repository 패턴 적용
 2026-07-24
 글 작성에 이메일 인증 요구
 분류 필터 / 분류 검증
+본문 마크다운화 + 썸네일 추출
 '''
 
 from fastapi import APIRouter, Depends, HTTPException, Body
@@ -23,6 +24,7 @@ from ..schema.response import (
     ListPostSchema, PostListItemSchema, PostDetailSchema,
     UserBriefSchema, CategorySchema,
 )
+from ..service.markdown import extract_first_image
 from .dependency import get_current_user, get_verified_user
 
 router = APIRouter(tags=["post"])
@@ -53,6 +55,7 @@ def get_pages_handler(
                 title=post.title,
                 user=UserBriefSchema.model_validate(post.user),
                 category=CategorySchema.model_validate(post.category),
+                thumbnail_url=post.thumbnail_url,
                 created_at=post.created_at,
                 comment_count=comment_count,
             )
@@ -86,7 +89,9 @@ def create_post_handler(
         raise HTTPException(status_code=400, detail="category not found")
 
     post = Post.create(request=request, user_id=current_user.id)
-    post = post_repo.save_with_images(post=post, image_urls=request.image)
+    # 목록 미리보기용. 매번 본문을 훑지 않도록 쓸 때 한 번만 계산한다
+    post.thumbnail_url = extract_first_image(request.contents)
+    post = post_repo.save(post)
     return post
 
 
@@ -108,6 +113,7 @@ def update_post_handler(
         post.title = title
     if contents is not None:
         post.contents = contents
+        post.thumbnail_url = extract_first_image(contents)   # 본문이 바뀌면 썸네일도
     post.updated_at = datetime.now(timezone.utc)
     post = post_repo.update(post)
 

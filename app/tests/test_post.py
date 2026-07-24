@@ -9,6 +9,7 @@
 
 2026-07-24
 분류 반영
+이미지 제거 / 썸네일 반영
 '''
 
 from datetime import datetime, timezone
@@ -27,7 +28,8 @@ def _make_category(id=1, slug="dnd", name="TRPG"):
     return Category(id=id, slug=slug, name=name, display_order=0)
 
 
-def _make_post(id=1, title="테스트 글", contents="본문", user_id=1, nickname="tester"):
+def _make_post(id=1, title="테스트 글", contents="본문", user_id=1,
+               nickname="tester", thumbnail_url=None):
     """테스트용 Post 객체 생성 헬퍼"""
     now = datetime(2026, 7, 21, tzinfo=timezone.utc)
     post = Post(
@@ -36,6 +38,7 @@ def _make_post(id=1, title="테스트 글", contents="본문", user_id=1, nickna
         contents=contents,
         user_id=user_id,
         category_id=1,
+        thumbnail_url=thumbnail_url,
         created_at=now,
         updated_at=now,
         is_deleted=False,
@@ -44,14 +47,13 @@ def _make_post(id=1, title="테스트 글", contents="본문", user_id=1, nickna
     post.user = _make_user(id=user_id, nickname=nickname)
     post.category = _make_category()
     post.comments = []
-    post.images = []
     return post
 
 
 # ---------- 목록 조회 ----------
 
 def test_get_pages(client, mock_post_repo, mock_category_repo):
-    mock_post_repo.get_posts.return_value = [_make_post()]
+    mock_post_repo.get_posts.return_value = [_make_post(thumbnail_url="/img/a.png")]
     mock_post_repo.count_comments.return_value = 2
 
     response = client.get("/pages")
@@ -62,7 +64,19 @@ def test_get_pages(client, mock_post_repo, mock_category_repo):
     assert data["posts"][0]["title"] == "테스트 글"
     assert data["posts"][0]["user"]["nickname"] == "tester"
     assert data["posts"][0]["category"]["slug"] == "dnd"
+    assert data["posts"][0]["thumbnail_url"] == "/img/a.png"
     assert data["posts"][0]["comment_count"] == 2
+
+
+def test_get_pages_without_thumbnail(client, mock_post_repo, mock_category_repo):
+    """이미지 없는 글은 썸네일이 null"""
+    mock_post_repo.get_posts.return_value = [_make_post()]
+    mock_post_repo.count_comments.return_value = 0
+
+    response = client.get("/pages")
+
+    assert response.status_code == 200
+    assert response.json()["posts"][0]["thumbnail_url"] is None
 
 
 def test_get_pages_empty(client, mock_post_repo, mock_category_repo):
@@ -115,7 +129,6 @@ def test_get_page(client, mock_post_repo):
     assert data["title"] == "테스트 글"
     assert data["category"]["name"] == "TRPG"
     assert data["comments"] == []
-    assert data["images"] == []
 
 
 def test_get_page_not_found(client, mock_post_repo):
@@ -132,31 +145,37 @@ def test_get_page_not_found(client, mock_post_repo):
 
 def test_create_post(auth_client, mock_post_repo, mock_category_repo):
     mock_category_repo.get_category_by_id.return_value = _make_category()
-    mock_post_repo.save_with_images.return_value = _make_post(id=10, title="새 글")
+    mock_post_repo.save.return_value = _make_post(id=10, title="새 글")
 
     response = auth_client.post(
         "/page",
-        json={"title": "새 글", "contents": "새 본문", "category_id": 1, "image": []},
+        json={"title": "새 글", "contents": "새 본문", "category_id": 1},
     )
 
     assert response.status_code == 201
     data = response.json()
     assert data["id"] == 10
     assert data["title"] == "새 글"
-    mock_post_repo.save_with_images.assert_called_once()
+    mock_post_repo.save.assert_called_once()
 
 
-def test_create_post_without_image(auth_client, mock_post_repo, mock_category_repo):
-    """image를 안 보내도 글이 만들어지는지 (기본값 [])"""
+def test_create_post_extracts_thumbnail(auth_client, mock_post_repo, mock_category_repo):
+    """본문 첫 이미지가 썸네일로 저장되는지"""
     mock_category_repo.get_category_by_id.return_value = _make_category()
-    mock_post_repo.save_with_images.return_value = _make_post(id=11)
+    mock_post_repo.save.return_value = _make_post(id=10)   # 응답 변환용
 
-    response = auth_client.post(
+    auth_client.post(
         "/page",
-        json={"title": "이미지 없는 글", "contents": "본문", "category_id": 1},
+        json={
+            "title": "글",
+            "contents": "앞글\n\n![](/img/first.png)\n\n![](/img/second.png)",
+            "category_id": 1,
+        },
     )
 
-    assert response.status_code == 201
+    # 반환값이 아니라 save 에 넘어간 객체를 본다
+    saved = mock_post_repo.save.call_args.args[0]
+    assert saved.thumbnail_url == "/img/first.png"
 
 
 def test_create_post_unknown_category(auth_client, mock_post_repo, mock_category_repo):
@@ -168,7 +187,7 @@ def test_create_post_unknown_category(auth_client, mock_post_repo, mock_category
     )
 
     assert response.status_code == 400
-    mock_post_repo.save_with_images.assert_not_called()
+    mock_post_repo.save.assert_not_called()
 
 
 def test_create_post_without_token(client, mock_post_repo, mock_category_repo):
@@ -178,7 +197,7 @@ def test_create_post_without_token(client, mock_post_repo, mock_category_repo):
     )
 
     assert response.status_code == 401
-    mock_post_repo.save_with_images.assert_not_called()
+    mock_post_repo.save.assert_not_called()
 
 
 def test_create_post_missing_field(auth_client, mock_post_repo, mock_category_repo):
@@ -200,6 +219,17 @@ def test_update_post(auth_client, mock_post_repo):
     assert response.status_code == 200
     assert response.json()["title"] == "수정된 제목"
     mock_post_repo.update.assert_called_once()
+
+
+def test_update_post_updates_thumbnail(auth_client, mock_post_repo):
+    """본문이 바뀌면 썸네일도 다시 계산된다"""
+    post = _make_post(user_id=1, thumbnail_url="/img/old.png")
+    mock_post_repo.get_post_by_id.return_value = post
+    mock_post_repo.update.return_value = post
+
+    auth_client.patch("/page/1", json={"contents": "![](/img/new.png)"})
+
+    assert post.thumbnail_url == "/img/new.png"
 
 
 def test_update_post_not_mine(auth_client, mock_post_repo):

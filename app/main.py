@@ -21,14 +21,14 @@ user 라우터 추가
 
 2026-07-24
 정적 파일 서빙 (static)
-category 라우터 추가
+category / upload 라우터 추가
 '''
 
 from pathlib import Path
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from .api import post, comment, user, category
+from .api import post, comment, user, category, upload
 
 app = FastAPI()
 
@@ -39,6 +39,7 @@ app.include_router(post.router)
 app.include_router(comment.router)
 app.include_router(user.router)
 app.include_router(category.router)
+app.include_router(upload.router)
 
 
 @app.get("/health", status_code=200)#헬스 체크

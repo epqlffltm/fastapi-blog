@@ -1,4 +1,4 @@
-// 2026-07-24 글 상세 + 댓글
+// 2026-07-24 글 상세 + 댓글 (본문은 마크다운 뷰어로 렌더)
 
 const postId = new URLSearchParams(location.search).get("id");
 
@@ -6,8 +6,7 @@ const article = document.getElementById("post");
 const status = document.getElementById("status");
 const titleEl = document.getElementById("title");
 const metaEl = document.getElementById("meta");
-const contentsEl = document.getElementById("contents");
-const imagesEl = document.getElementById("images");
+const viewerEl = document.getElementById("viewer");
 const postActions = document.getElementById("post-actions");
 
 const commentCountEl = document.getElementById("comment-count");
@@ -55,16 +54,13 @@ function render(post) {
     rest.textContent = ` · ${post.user.nickname} · ${formatDate(post.created_at)}`;
     metaEl.append(category, rest);
 
-    contentsEl.textContent = post.contents;    // white-space: pre-wrap 이 줄바꿈을 살린다
-
-    imagesEl.replaceChildren();
-    for (const image of post.images) {
-        const img = document.createElement("img");
-        img.src = image.url;
-        img.alt = "";
-        img.loading = "lazy";
-        imagesEl.append(img);
-    }
+    // 저장된 건 마크다운 텍스트. 뷰어가 HTML 로 바꿔 그린다
+    toastui.Editor.factory({
+        el: viewerEl,
+        viewer: true,
+        theme: "dark",
+        initialValue: post.contents,
+    });
 
     // 내 글에만 수정·삭제를 보인다 (실제 차단은 서버가 한다)
     if (currentUser && currentUser.id === post.user.id) {
@@ -101,7 +97,7 @@ function createCommentItem(comment) {
 
     const body = document.createElement("div");
     body.className = "comment-body";
-    body.textContent = comment.contents;
+    body.textContent = comment.contents;       // 댓글은 마크다운이 아니라 평문
 
     li.append(head, body);
 
@@ -128,7 +124,7 @@ function createCommentActions(comment, li, body) {
         try {
             await api.del(`/comment/${comment.id}`);
             li.remove();
-            updateCommentCount(-1);
+            updateCommentCount();
         } catch (err) {
             alert(err.message);
         }
@@ -138,7 +134,7 @@ function createCommentActions(comment, li, body) {
     return actions;
 }
 
-// 읽기 모드 → 입력 모드. 저장하면 되돌린다
+// 읽기 모드 → 입력 모드. 저장하거나 취소하면 되돌린다
 function startEdit(comment, li, body, actions) {
     const textarea = document.createElement("textarea");
     textarea.value = comment.contents;
@@ -182,9 +178,8 @@ function startEdit(comment, li, body, actions) {
     cancel.addEventListener("click", () => restore(comment.contents));
 }
 
-function updateCommentCount(delta) {
-    const current = commentList.children.length;
-    commentCountEl.textContent = `댓글 ${current}`;
+function updateCommentCount() {
+    commentCountEl.textContent = `댓글 ${commentList.children.length}`;
 }
 
 // 로그인·인증 상태에 따라 댓글 폼 또는 안내를 보인다
@@ -195,19 +190,14 @@ function renderCommentForm() {
     }
 
     commentGuard.hidden = false;
-    if (!currentUser) {
-        commentGuard.append(document.createTextNode("댓글을 쓰려면 "));
-        const link = document.createElement("a");
-        link.href = "/login";
-        link.textContent = "로그인";
-        commentGuard.append(link, document.createTextNode("이 필요합니다."));
-    } else {
-        commentGuard.append(document.createTextNode("댓글을 쓰려면 "));
-        const link = document.createElement("a");
-        link.href = "/signup";
-        link.textContent = "이메일 인증";
-        commentGuard.append(link, document.createTextNode("이 필요합니다."));
-    }
+    const href = currentUser ? "/signup" : "/login";
+    const text = currentUser ? "이메일 인증" : "로그인";
+
+    commentGuard.append(document.createTextNode("댓글을 쓰려면 "));
+    const link = document.createElement("a");
+    link.href = href;
+    link.textContent = text;
+    commentGuard.append(link, document.createTextNode("이 필요합니다."));
 }
 
 commentForm.addEventListener("submit", async (event) => {

@@ -8,7 +8,7 @@
 인증/권한 반영
 
 2026-07-24
-분류 반영
+분류 반영 / 이미지 제거
 '''
 
 from datetime import datetime, timezone
@@ -27,12 +27,11 @@ def _make_post(id=1, user_id=1):
     now = datetime(2026, 7, 21, tzinfo=timezone.utc)
     post = Post(
         id=id, title="글", contents="본문", user_id=user_id, category_id=1,
-        created_at=now, updated_at=now, is_deleted=False,
+        thumbnail_url=None, created_at=now, updated_at=now, is_deleted=False,
     )
     post.user = _make_user(id=user_id)
     post.category = Category(id=1, slug="dnd", name="TRPG", display_order=0)
     post.comments = []
-    post.images = []
     return post
 
 

@@ -11,6 +11,7 @@ get 단일 조회 api
 
 2026-07-24
 분류 스키마 추가
+이미지 스키마 제거 / 목록에 썸네일 추가
 '''
 
 from pydantic import BaseModel, ConfigDict
@@ -54,6 +55,7 @@ class PostListItemSchema(BaseModel):
     title: str
     user: UserBriefSchema
     category: CategorySchema
+    thumbnail_url: str | None
     created_at: datetime
     comment_count: int
 
@@ -73,16 +75,7 @@ class CommentSchema(BaseModel):
     created_at: datetime
 
 
-# 이미지 하나
-class ImageSchema(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    url: str
-    display_order: int
-
-
-# 글 상세 (댓글 + 이미지를 품음)
+# 글 상세 (본문은 마크다운, 이미지는 그 안에 있다)
 class PostDetailSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -94,7 +87,6 @@ class PostDetailSchema(BaseModel):
     created_at: datetime
     updated_at: datetime
     comments: list[CommentSchema]
-    images: list[ImageSchema]
 
 
 class UserSchema(BaseModel):
@@ -105,3 +97,9 @@ class UserSchema(BaseModel):
     nickname: str
     is_verified: bool
     # password 는 절대 포함하지 않는다
+
+
+class UploadSchema(BaseModel):
+    url: str
+    filename: str
+    size: int
