@@ -6,25 +6,26 @@
 
 2026-07-24
 인증된 유저 의존성 추가
+2026-07-24
+httpOnly 쿠키에서 토큰을 읽도록 변경
 '''
 
 import jwt
-from fastapi import Depends, HTTPException
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi import Cookie, Depends, HTTPException
 from ..database.orm import User
 from ..database.repository import UserRepository
 from ..service.auth import AuthService
 
+COOKIE_NAME = "access_token"
+
 
 def get_access_token(
-    auth_header: HTTPAuthorizationCredentials | None = Depends(
-        HTTPBearer(auto_error=False)
-    ),
+    access_token: str | None = Cookie(default=None, alias=COOKIE_NAME),
 ) -> str:
-    # Authorization: Bearer <token> 에서 토큰만 꺼낸다
-    if auth_header is None:
+    # JS가 읽을 수 없는 httpOnly 쿠키에서 꺼낸다
+    if access_token is None:
         raise HTTPException(status_code=401, detail="not authorized")
-    return auth_header.credentials
+    return access_token
 
 
 def get_current_user(
@@ -43,6 +44,7 @@ def get_current_user(
     if user is None:      # 토큰은 유효한데 계정이 사라진 경우
         raise HTTPException(status_code=401, detail="user not found")
     return user
+
 
 def get_verified_user(
     current_user: User = Depends(get_current_user),

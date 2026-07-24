@@ -6,6 +6,9 @@ db연결
 
 2026-07-23
 Settings에 필드 추가
+
+2026-07-24
+쿠키 설정 추가
 '''
 
 from sqlalchemy import create_engine
@@ -25,6 +28,8 @@ class Settings(BaseSettings):
     smtp_port: int = 587                    # 추가
     smtp_user: str = ""                     # 추가
     smtp_password: str = ""                 # 추가
+    cookie_secure: bool = False    # 추가: 배포(HTTPS)에서 true
+    cookie_max_age: int = 86400
 
 
 settings = Settings()

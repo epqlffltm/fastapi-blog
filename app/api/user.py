@@ -10,15 +10,17 @@
 create_otp_handler 교체
 '''
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
 from ..database.repository import UserRepository
 from ..database.orm import User
 from ..service.auth import AuthService
-from ..schema.response import UserSchema, JWTResponse
-from .dependency import get_current_user
+from ..schema.response import UserSchema
+from .dependency import get_current_user, COOKIE_NAME
 from ..schema.request import SignUpRequest, LogInRequest, VerifyOTPRequest, ResetPasswordRequest, ResetPasswordVerifyRequest
 from ..service.otp import OTPService
 from ..service.email import EmailService
+from ..database.connection import settings
+
 
 router = APIRouter(prefix="/user", tags=["user"])
 
@@ -46,9 +48,10 @@ def sign_up_handler(
     user = user_repo.save_user(user)
     return user
 
-@router.post("/log-in", status_code=200, response_model=JWTResponse)#로그인
+@router.post("/log-in", status_code=200, response_model=UserSchema)#로그인
 def log_in_handler(
     request: LogInRequest,
+    response: Response,
     user_repo: UserRepository = Depends(),
     auth_service: AuthService = Depends(),
 ):
@@ -59,7 +62,29 @@ def log_in_handler(
     if not auth_service.verify_password(request.password, user.password):
         raise HTTPException(status_code=401, detail="invalid email or password")
 
-    return JWTResponse(access_token=auth_service.create_jwt(user.id))
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=auth_service.create_jwt(user.id),
+        httponly=True,                      # JS가 읽을 수 없다 (XSS 방어)
+        secure=settings.cookie_secure,      # HTTPS 전용 (배포 시 true)
+        samesite="strict",                  # 다른 사이트발 요청엔 안 붙는다 (CSRF 방어)
+        max_age=settings.cookie_max_age,
+        path="/",
+    )
+    return user       # 프론트가 닉네임 등을 바로 쓸 수 있게 회원 정보를 반환
+
+
+@router.post("/log-out", status_code=200)#로그아웃
+def log_out_handler(response: Response):
+    # 쿠키를 지울 때도 발급 때와 같은 속성을 줘야 브라우저가 같은 쿠키로 인식한다
+    response.delete_cookie(
+        key=COOKIE_NAME,
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite="strict",
+        path="/",
+    )
+    return {"message": "logged out"}
 
 
 @router.get("/me", status_code=200, response_model=UserSchema)#내 정보

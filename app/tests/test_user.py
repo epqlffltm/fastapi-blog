@@ -3,6 +3,9 @@
 '''
 2026-07-23
 회원 API 테스트
+
+2026-07-24
+쿠키 방식으로 변경
 '''
 
 import jwt
@@ -131,9 +134,14 @@ def test_log_in(client, mock_user_repo):
     )
 
     assert response.status_code == 200
-    data = response.json()
-    assert "access_token" in data
-    assert data["token_type"] == "bearer"
+    assert response.json()["nickname"] == "tester"
+    assert "password" not in response.json()
+    assert "access_token" not in response.text      # 토큰이 본문에 새면 안 된다
+
+    set_cookie = response.headers["set-cookie"].lower()
+    assert "access_token=" in set_cookie
+    assert "httponly" in set_cookie                 # JS가 못 읽어야 한다
+    assert "samesite=strict" in set_cookie          # CSRF 방어
 
 
 def test_log_in_wrong_password(client, mock_user_repo):
@@ -149,6 +157,7 @@ def test_log_in_wrong_password(client, mock_user_repo):
 
     assert response.status_code == 401
     assert response.json()["detail"] == "invalid email or password"
+    assert "set-cookie" not in response.headers     # 실패 시 쿠키를 주면 안 된다
 
 
 def test_log_in_no_such_email(client, mock_user_repo):
@@ -164,6 +173,47 @@ def test_log_in_no_such_email(client, mock_user_repo):
     assert response.json()["detail"] == "invalid email or password"
 
 
+# ---------- 로그아웃 ----------
+
+def test_log_out(client):
+    response = client.post("/user/log-out")
+
+    assert response.status_code == 200
+    set_cookie = response.headers["set-cookie"].lower()
+    assert "access_token=" in set_cookie
+    assert 'max-age=0' in set_cookie or 'expires=' in set_cookie   # 삭제 지시
+
+
+# ---------- 내 정보 (쿠키 인증) ----------
+
+def test_get_me(client, mock_user_repo):
+    user = _make_user()
+    mock_user_repo.get_user_by_id.return_value = user
+    client.cookies.set("access_token", AuthService().create_jwt(user.id))
+
+    response = client.get("/user/me")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["email"] == "test@example.com"
+    assert "password" not in data
+
+
+def test_get_me_without_cookie(client, mock_user_repo):
+    response = client.get("/user/me")
+
+    assert response.status_code == 401
+
+
+def test_get_me_invalid_cookie(client, mock_user_repo):
+    client.cookies.set("access_token", "garbage")
+
+    response = client.get("/user/me")
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "invalid token"
+    
+'''
 # ---------- 내 정보 (토큰 인증) ----------
 
 def test_get_me(client, mock_user_repo):
@@ -191,7 +241,7 @@ def test_get_me_invalid_token(client, mock_user_repo):
     assert response.status_code == 401
     assert response.json()["detail"] == "invalid token"
 
-
+'''
 # ---------- JWT 자체 테스트 ----------
 
 def test_jwt_roundtrip():

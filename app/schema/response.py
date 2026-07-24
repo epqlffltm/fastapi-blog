@@ -80,7 +80,8 @@ class UserSchema(BaseModel):
     nickname: str
     is_verified: bool
 
-
+'''
 class JWTResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+'''
