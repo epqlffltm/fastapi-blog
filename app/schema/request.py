@@ -21,8 +21,8 @@ class ContentCreate(BaseModel):
 
 class PostCreate(ContentCreate):
     title: str
+    category_id: int
     image: list[str] = []
-
 
 class CommentCreate(ContentCreate):
     pass

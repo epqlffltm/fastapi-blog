@@ -10,15 +10,19 @@ repository 패턴 적용
 
 2026-07-24
 글 작성에 이메일 인증 요구
+분류 필터 / 분류 검증
 '''
 
 from fastapi import APIRouter, Depends, HTTPException, Body
 from datetime import datetime, timezone
 from typing import Optional
-from ..database.repository import PostRepository
+from ..database.repository import PostRepository, CategoryRepository
 from ..database.orm import Post, User
 from ..schema.request import PostCreate
-from ..schema.response import ListPostSchema, PostListItemSchema, PostDetailSchema, UserBriefSchema
+from ..schema.response import (
+    ListPostSchema, PostListItemSchema, PostDetailSchema,
+    UserBriefSchema, CategorySchema,
+)
 from .dependency import get_current_user, get_verified_user
 
 router = APIRouter(tags=["post"])
@@ -27,9 +31,18 @@ router = APIRouter(tags=["post"])
 @router.get("/pages", status_code=200, response_model=ListPostSchema)#글 목록 보기
 def get_pages_handler(
     order: str = "random",
+    category: str | None = None,
     post_repo: PostRepository = Depends(),
+    category_repo: CategoryRepository = Depends(),
 ):
-    posts = post_repo.get_posts(order=order.lower())
+    category_id = None
+    if category is not None:
+        found = category_repo.get_category_by_slug(category)
+        if found is None:
+            raise HTTPException(status_code=404, detail="category not found")
+        category_id = found.id
+
+    posts = post_repo.get_posts(order=order.lower(), category_id=category_id)
 
     result = []
     for post in posts:
@@ -39,6 +52,7 @@ def get_pages_handler(
                 id=post.id,
                 title=post.title,
                 user=UserBriefSchema.model_validate(post.user),
+                category=CategorySchema.model_validate(post.category),
                 created_at=post.created_at,
                 comment_count=comment_count,
             )
@@ -56,6 +70,7 @@ def get_page_handler(
     if post is None:
         raise HTTPException(status_code=404, detail="post not found")
 
+    # 삭제 안 된 댓글만 남기기 (relationship은 삭제 여부를 안 가리므로 직접 필터)
     post.comments = [c for c in post.comments if not c.is_deleted]
     return post
 
@@ -65,7 +80,11 @@ def create_post_handler(
     request: PostCreate,
     current_user: User = Depends(get_verified_user),   # 이메일 인증된 회원만
     post_repo: PostRepository = Depends(),
+    category_repo: CategoryRepository = Depends(),
 ):
+    if category_repo.get_category_by_id(request.category_id) is None:
+        raise HTTPException(status_code=400, detail="category not found")
+
     post = Post.create(request=request, user_id=current_user.id)
     post = post_repo.save_with_images(post=post, image_urls=request.image)
     return post

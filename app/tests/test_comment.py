@@ -7,16 +7,18 @@
 2026-07-23
 인증/권한 반영
 
+2026-07-24
+분류 반영
 '''
 
 from datetime import datetime, timezone
-from app.database.orm import Post, Comment, User
+from app.database.orm import Post, Comment, User, Category
 
 
 def _make_user(id=1, nickname="tester"):
     return User(
         id=id, email=f"{nickname}@example.com", password="hash",
-        nickname=nickname, is_verified=False,
+        nickname=nickname, is_verified=True,
         created_at=datetime(2026, 7, 23, tzinfo=timezone.utc),
     )
 
@@ -24,10 +26,11 @@ def _make_user(id=1, nickname="tester"):
 def _make_post(id=1, user_id=1):
     now = datetime(2026, 7, 21, tzinfo=timezone.utc)
     post = Post(
-        id=id, title="글", contents="본문", user_id=user_id,
+        id=id, title="글", contents="본문", user_id=user_id, category_id=1,
         created_at=now, updated_at=now, is_deleted=False,
     )
     post.user = _make_user(id=user_id)
+    post.category = Category(id=1, slug="dnd", name="TRPG", display_order=0)
     post.comments = []
     post.images = []
     return post
@@ -63,12 +66,13 @@ def test_create_comment_without_token(client, mock_post_repo, mock_comment_repo)
 
 
 def test_create_comment_post_not_found(auth_client, mock_post_repo, mock_comment_repo):
+    """없는 글에 댓글 달면 404"""
     mock_post_repo.get_post_by_id.return_value = None
 
     response = auth_client.post("/page/999/comment", json={"contents": "댓글"})
 
     assert response.status_code == 404
-    mock_comment_repo.save.assert_not_called()
+    mock_comment_repo.save.assert_not_called()      # 저장 시도조차 안 했나
 
 
 # ---------- 수정 ----------
@@ -131,5 +135,3 @@ def test_delete_comment_not_found(auth_client, mock_comment_repo):
     response = auth_client.delete("/comment/999")
 
     assert response.status_code == 404
-    
-    

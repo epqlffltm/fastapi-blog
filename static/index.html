@@ -14,9 +14,16 @@
         </div>
     </header>
 
-    <main class="container">
-        <ul class="post-list" id="post-list"></ul>
-        <p class="empty" id="empty" hidden>아직 글이 없습니다.</p>
+    <main class="container layout">
+        <aside class="sidebar">
+            <h2>category</h2>
+            <ul class="category-list" id="category-list"></ul>
+        </aside>
+
+        <section>
+            <ul class="post-list" id="post-list"></ul>
+            <p class="empty" id="empty" hidden>아직 글이 없습니다.</p>
+        </section>
     </main>
 
     <script src="/js/api.js"></script>

@@ -9,13 +9,21 @@
 
 2026-07-24
 시드 계정은 인증됨으로 생성
+분류(사이드바) 추가
 '''
 
 from datetime import datetime
 from .database.connection import SessionFactory
-from .database.orm import Post, Comment, Image, User
+from .database.orm import Post, Comment, Image, User, Category
 from .service.auth import AuthService
 
+
+# 분류 (slug: URL용 / name: 화면 표시용)
+categories_data = [
+    {"slug": "dnd", "name": "TRPG", "display_order": 0},
+    {"slug": "dev", "name": "개발", "display_order": 1},
+    {"slug": "daily", "name": "일상", "display_order": 2},
+]
 
 # 시드 계정 (비번은 전부 seedpass123)
 users_data = ["hong", "gil", "dong", "kim", "lee", "park", "choi", "jung", "yoon"]
@@ -23,6 +31,7 @@ users_data = ["hong", "gil", "dong", "kim", "lee", "park", "choi", "jung", "yoon
 posts_data = [
     {
         "author": "hong",
+        "category": "dnd",
         "created_at": datetime.fromisoformat("2026-07-16T09:00:00+00:00"),
         "updated_at": datetime.fromisoformat("2026-07-16T09:00:00+00:00"),
         "title": "dnd 밈1",
@@ -44,6 +53,7 @@ posts_data = [
     },
     {
         "author": "gil",
+        "category": "dnd",
         "created_at": datetime.fromisoformat("2026-07-16T10:30:00+00:00"),
         "updated_at": datetime.fromisoformat("2026-07-16T10:30:00+00:00"),
         "title": "dnd 밈2",
@@ -68,6 +78,7 @@ posts_data = [
     },
     {
         "author": "dong",
+        "category": "dnd",
         "created_at": datetime.fromisoformat("2026-07-16T14:15:00+00:00"),
         "updated_at": datetime.fromisoformat("2026-07-16T14:15:00+00:00"),
         "title": "dnd 밈3",
@@ -87,7 +98,14 @@ def seed():
     session = SessionFactory()
     auth_service = AuthService()
     try:
-        # 1) 회원 먼저 생성 (글이 user_id를 참조하므로)
+        # 1) 분류
+        slug_to_category = {}
+        for cdata in categories_data:
+            category = Category(**cdata)
+            session.add(category)
+            slug_to_category[cdata["slug"]] = category
+
+        # 2) 회원 (글이 user_id 를 참조하므로 먼저)
         hashed = auth_service.hash_password("seedpass123")
         nickname_to_user = {}
         for nickname in users_data:
@@ -100,16 +118,21 @@ def seed():
             session.add(user)
             nickname_to_user[nickname] = user
 
-        session.flush()   # user.id 확보
+        session.flush()   # id 확보
 
-        # 2) 글/댓글/이미지
+        # 3) 글/댓글/이미지
         for pdata in posts_data:
             data = dict(pdata)
             comments_data = data.pop("comments")
             images_data = data.pop("images")
             author = data.pop("author")
+            category_slug = data.pop("category")
 
-            post = Post(user_id=nickname_to_user[author].id, **data)
+            post = Post(
+                user_id=nickname_to_user[author].id,
+                category_id=slug_to_category[category_slug].id,
+                **data,
+            )
             post.comments = [
                 Comment(
                     user_id=nickname_to_user[c["author"]].id,
@@ -123,7 +146,7 @@ def seed():
             session.add(post)
 
         session.commit()
-        print("시드 완료 (계정 9개 / 비번 seedpass123)")
+        print("시드 완료 (분류 3개 / 계정 9개 / 비번 seedpass123)")
     finally:
         session.close()
 

@@ -6,18 +6,25 @@
 
 2026-07-23
 인증/권한 반영
+
+2026-07-24
+분류 반영
 '''
 
 from datetime import datetime, timezone
-from app.database.orm import Post, User
+from app.database.orm import Post, User, Category
 
 
 def _make_user(id=1, nickname="tester"):
     return User(
         id=id, email=f"{nickname}@example.com", password="hash",
-        nickname=nickname, is_verified=False,
+        nickname=nickname, is_verified=True,
         created_at=datetime(2026, 7, 23, tzinfo=timezone.utc),
     )
+
+
+def _make_category(id=1, slug="dnd", name="TRPG"):
+    return Category(id=id, slug=slug, name=name, display_order=0)
 
 
 def _make_post(id=1, title="테스트 글", contents="본문", user_id=1, nickname="tester"):
@@ -28,11 +35,14 @@ def _make_post(id=1, title="테스트 글", contents="본문", user_id=1, nickna
         title=title,
         contents=contents,
         user_id=user_id,
+        category_id=1,
         created_at=now,
         updated_at=now,
         is_deleted=False,
     )
+    # mock 으로 만든 객체는 DB를 거치지 않으므로 관계를 직접 채운다
     post.user = _make_user(id=user_id, nickname=nickname)
+    post.category = _make_category()
     post.comments = []
     post.images = []
     return post
@@ -40,7 +50,7 @@ def _make_post(id=1, title="테스트 글", contents="본문", user_id=1, nickna
 
 # ---------- 목록 조회 ----------
 
-def test_get_pages(client, mock_post_repo):
+def test_get_pages(client, mock_post_repo, mock_category_repo):
     mock_post_repo.get_posts.return_value = [_make_post()]
     mock_post_repo.count_comments.return_value = 2
 
@@ -51,10 +61,11 @@ def test_get_pages(client, mock_post_repo):
     assert len(data["posts"]) == 1
     assert data["posts"][0]["title"] == "테스트 글"
     assert data["posts"][0]["user"]["nickname"] == "tester"
+    assert data["posts"][0]["category"]["slug"] == "dnd"
     assert data["posts"][0]["comment_count"] == 2
 
 
-def test_get_pages_empty(client, mock_post_repo):
+def test_get_pages_empty(client, mock_post_repo, mock_category_repo):
     mock_post_repo.get_posts.return_value = []
 
     response = client.get("/pages")
@@ -63,12 +74,32 @@ def test_get_pages_empty(client, mock_post_repo):
     assert response.json()["posts"] == []
 
 
-def test_get_pages_order_asc(client, mock_post_repo):
+def test_get_pages_order_asc(client, mock_post_repo, mock_category_repo):
+    """정렬 파라미터가 repository에 전달되는지"""
     mock_post_repo.get_posts.return_value = []
 
     client.get("/pages?order=asc")
 
-    mock_post_repo.get_posts.assert_called_once_with(order="asc")
+    mock_post_repo.get_posts.assert_called_once_with(order="asc", category_id=None)
+
+
+def test_get_pages_filtered_by_category(client, mock_post_repo, mock_category_repo):
+    mock_category_repo.get_category_by_slug.return_value = _make_category(id=7)
+    mock_post_repo.get_posts.return_value = []
+
+    response = client.get("/pages?category=dnd&order=desc")
+
+    assert response.status_code == 200
+    mock_post_repo.get_posts.assert_called_once_with(order="desc", category_id=7)
+
+
+def test_get_pages_unknown_category(client, mock_post_repo, mock_category_repo):
+    mock_category_repo.get_category_by_slug.return_value = None
+
+    response = client.get("/pages?category=nope")
+
+    assert response.status_code == 404
+    mock_post_repo.get_posts.assert_not_called()
 
 
 # ---------- 단일 조회 ----------
@@ -82,12 +113,13 @@ def test_get_page(client, mock_post_repo):
     data = response.json()
     assert data["id"] == 1
     assert data["title"] == "테스트 글"
-    assert data["user"]["nickname"] == "tester"
+    assert data["category"]["name"] == "TRPG"
     assert data["comments"] == []
     assert data["images"] == []
 
 
 def test_get_page_not_found(client, mock_post_repo):
+    """없는 글이면 404"""
     mock_post_repo.get_post_by_id.return_value = None
 
     response = client.get("/page/999")
@@ -98,12 +130,13 @@ def test_get_page_not_found(client, mock_post_repo):
 
 # ---------- 생성 ----------
 
-def test_create_post(auth_client, mock_post_repo):
+def test_create_post(auth_client, mock_post_repo, mock_category_repo):
+    mock_category_repo.get_category_by_id.return_value = _make_category()
     mock_post_repo.save_with_images.return_value = _make_post(id=10, title="새 글")
 
     response = auth_client.post(
         "/page",
-        json={"title": "새 글", "contents": "새 본문", "image": []},
+        json={"title": "새 글", "contents": "새 본문", "category_id": 1, "image": []},
     )
 
     assert response.status_code == 201
@@ -113,26 +146,43 @@ def test_create_post(auth_client, mock_post_repo):
     mock_post_repo.save_with_images.assert_called_once()
 
 
-def test_create_post_without_image(auth_client, mock_post_repo):
+def test_create_post_without_image(auth_client, mock_post_repo, mock_category_repo):
+    """image를 안 보내도 글이 만들어지는지 (기본값 [])"""
+    mock_category_repo.get_category_by_id.return_value = _make_category()
     mock_post_repo.save_with_images.return_value = _make_post(id=11)
 
     response = auth_client.post(
         "/page",
-        json={"title": "이미지 없는 글", "contents": "본문"},
+        json={"title": "이미지 없는 글", "contents": "본문", "category_id": 1},
     )
 
     assert response.status_code == 201
 
 
-def test_create_post_without_token(client, mock_post_repo):
+def test_create_post_unknown_category(auth_client, mock_post_repo, mock_category_repo):
+    mock_category_repo.get_category_by_id.return_value = None
+
+    response = auth_client.post(
+        "/page",
+        json={"title": "글", "contents": "본문", "category_id": 999},
+    )
+
+    assert response.status_code == 400
+    mock_post_repo.save_with_images.assert_not_called()
+
+
+def test_create_post_without_token(client, mock_post_repo, mock_category_repo):
     """로그인 안 하면 글을 쓸 수 없다"""
-    response = client.post("/page", json={"title": "글", "contents": "본문"})
+    response = client.post(
+        "/page", json={"title": "글", "contents": "본문", "category_id": 1}
+    )
 
     assert response.status_code == 401
     mock_post_repo.save_with_images.assert_not_called()
 
 
-def test_create_post_missing_field(auth_client, mock_post_repo):
+def test_create_post_missing_field(auth_client, mock_post_repo, mock_category_repo):
+    """필수 필드 빠지면 422"""
     response = auth_client.post("/page", json={"title": "제목만"})
 
     assert response.status_code == 422
@@ -180,7 +230,7 @@ def test_delete_post(auth_client, mock_post_repo):
     response = auth_client.delete("/page/1")
 
     assert response.status_code == 204
-    assert post.is_deleted is True
+    assert post.is_deleted is True          # 소프트삭제 표시됐나
     mock_post_repo.update.assert_called_once()
 
 

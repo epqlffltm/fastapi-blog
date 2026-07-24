@@ -3,7 +3,7 @@
  * 다크 테마 · 애저 액센트 (fastapi-chat 과 동일 팔레트)
  *
  * 규칙 세 가지:
- *   1. 모노스페이스 = 기계가 읽는 식별자 (날짜, 개수, 이메일)
+ *   1. 모노스페이스 = 기계가 읽는 식별자 (날짜, 개수, 인증코드)
  *      UI 폰트      = 사람이 읽는 문장
  *   2. 액센트 색 = "누를 수 있는 것". 본문·제목에는 쓰지 않는다.
  *   3. 선언이 하나면 한 줄, 둘 이상이면 줄바꿈. (파일 전체 통일)
@@ -55,7 +55,7 @@ body {
 }
 
 .container {
-    max-width: 720px;
+    max-width: 900px;
     margin: 0 auto;
     padding: 0 20px;
 }
@@ -64,9 +64,9 @@ body {
 /* ── 헤더 ───────────────────────────────────────────────── */
 
 header {
+    margin-bottom: 32px;
     background: var(--bg-panel);
     border-bottom: 1px solid var(--line-soft);
-    margin-bottom: 32px;
 }
 
 header .container {
@@ -76,7 +76,7 @@ header .container {
     height: 52px;
 }
 
-/* 로고는 앱 이름 = 식별자 → 모노. 채팅의 .app-title 과 같은 처리 */
+/* 로고는 앱 이름 = 식별자 → 모노 */
 .logo {
     color: var(--accent);
     font-family: var(--mono);
@@ -118,6 +118,71 @@ nav .who {
 nav .who:hover { color: var(--text-faint); }
 
 
+/* ── 2단 레이아웃 (사이드바 + 본문) ────────────────────────── */
+
+.layout {
+    display: grid;
+    grid-template-columns: 170px 1fr;
+    gap: 36px;
+    align-items: start;
+}
+
+.sidebar {
+    position: sticky;
+    top: 20px;
+}
+
+.sidebar h2 {
+    margin: 0 0 10px 10px;
+    color: var(--text-faint);
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.category-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.category-list a {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 7px 10px;
+    border-radius: 6px;
+    color: var(--text-dim);
+    font-size: 13px;
+    text-decoration: none;
+}
+
+.category-list a:hover {
+    background: var(--bg-raised);
+    color: var(--text);
+}
+
+/* 현재 분류 — 굵게 하는 대신 왼쪽 레일 */
+.category-list a.active {
+    background: var(--accent-wash);
+    color: var(--text);
+    box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* 글 개수는 기계가 센 값 → 모노 */
+.category-list .count {
+    color: var(--text-faint);
+    font-family: var(--mono);
+    font-size: 11px;
+}
+
+
 /* ── 글 목록 ────────────────────────────────────────────── */
 
 .post-list {
@@ -150,6 +215,12 @@ nav .who:hover { color: var(--text-faint); }
     font-family: var(--mono);
     font-size: 11.5px;
     letter-spacing: 0.02em;
+}
+
+/* 목록의 분류 표시 — 링크가 아니므로 액센트를 쓰지 않는다 */
+.category-tag {
+    color: var(--text-dim);
+    font-family: var(--ui);
 }
 
 
@@ -236,8 +307,8 @@ h1 {
 }
 
 .comment-list li {
-    padding: 12px 14px;
     margin-bottom: 8px;
+    padding: 12px 14px;
     background: var(--bg-panel);
     border-radius: 8px;
 }
@@ -258,7 +329,7 @@ h1 {
 
 .comment-body { white-space: pre-wrap; }
 
-/* 댓글의 액션은 항목에 올렸을 때만 (채팅의 .msg-actions 와 같은 방식) */
+/* 댓글의 액션은 항목에 올렸을 때만 */
 .comment-list .actions {
     opacity: 0;
     transition: opacity 0.15s;
@@ -292,7 +363,8 @@ label {
 }
 
 input,
-textarea {
+textarea,
+select {
     width: 100%;
     padding: 9px 12px;
     background: var(--bg-raised);
@@ -344,7 +416,8 @@ input.code {
 }
 
 input:disabled,
-textarea:disabled {
+textarea:disabled,
+select:disabled {
     opacity: 0.45;
     cursor: not-allowed;
 }
@@ -398,7 +471,8 @@ textarea:disabled {
 }
 
 input:focus,
-textarea:focus { border-color: var(--accent); }
+textarea:focus,
+select:focus { border-color: var(--accent); }
 
 
 /* ── 스크롤바 ───────────────────────────────────────────── */
@@ -416,12 +490,25 @@ textarea:focus { border-color: var(--accent); }
 
 /* ── 좁은 화면 ──────────────────────────────────────────── */
 
-@media (max-width: 600px) {
+@media (max-width: 700px) {
     header .container { height: 48px; }
+
+    h1 { font-size: 19px; }
 
     form { max-width: none; }
 
-    h1 { font-size: 19px; }
+    /* 분류를 본문 위로 */
+    .layout {
+        grid-template-columns: 1fr;
+        gap: 20px;
+    }
+
+    .sidebar { position: static; }
+
+    .category-list {
+        flex-direction: row;
+        flex-wrap: wrap;
+    }
 
     /* 터치 기기엔 hover 가 없다 → 댓글 액션을 항상 보이게 */
     .comment-list .actions { opacity: 1; }

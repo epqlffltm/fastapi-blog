@@ -20,9 +20,9 @@ async function renderHeader() {
         const write = document.createElement("a");
         write.href = "/write";
         write.textContent = "글쓰기";
-        
+
         const name = document.createElement("span");
-        name.className = "who";                // meta → who (meta는 이제 모노스페이스)
+        name.className = "who";
         name.textContent = user.nickname;      // textContent: 태그가 실행되지 않는다
 
         const logout = document.createElement("button");

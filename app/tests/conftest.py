@@ -9,6 +9,7 @@
 
 2026-07-24
 이메일/미인증 fixture 추가
+분류 fixture 추가
 '''
 
 import pytest
@@ -18,7 +19,9 @@ from unittest.mock import Mock
 from redis import Redis
 from app.main import app
 from app.database.orm import User
-from app.database.repository import PostRepository, CommentRepository, UserRepository
+from app.database.repository import (
+    PostRepository, CommentRepository, UserRepository, CategoryRepository,
+)
 from app.database.cache import get_redis_client
 from app.api.dependency import get_current_user
 from app.service.email import EmailService
@@ -78,6 +81,14 @@ def mock_comment_repo():
 def mock_user_repo():
     repo = Mock(spec=UserRepository)
     app.dependency_overrides[UserRepository] = lambda: repo
+    yield repo
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def mock_category_repo():
+    repo = Mock(spec=CategoryRepository)
+    app.dependency_overrides[CategoryRepository] = lambda: repo
     yield repo
     app.dependency_overrides.clear()
 

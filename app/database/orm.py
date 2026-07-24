@@ -11,6 +11,9 @@ create classmethod 추가 (post api)
 2026-07-23
 회원 테이블
 nickname → user_id FK 전환
+
+2026-07-24
+사이드 바 추가
 '''
 
 from sqlalchemy import ForeignKey, String
@@ -24,14 +27,16 @@ class Post(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    category_id: Mapped[int] = mapped_column(ForeignKey("categories.id"), index=True)
     created_at: Mapped[datetime]
     updated_at: Mapped[datetime]
     title: Mapped[str]
     contents: Mapped[str]
     is_deleted: Mapped[bool] = mapped_column(default=False)
 
-    # N:1 이라 joined 로딩이 적합 (글 하나당 작성자 하나)
+    # N:1 이라 joined 로딩이 적합 (글 하나당 작성자·분류 하나)
     user: Mapped["User"] = relationship(back_populates="posts", lazy="joined")
+    category: Mapped["Category"] = relationship(back_populates="posts", lazy="joined")
     comments: Mapped[list["Comment"]] = relationship(back_populates="post")
     images: Mapped[list["Image"]] = relationship(back_populates="post")
 
@@ -45,6 +50,7 @@ class Post(Base):
             title=request.title,
             contents=request.contents,
             user_id=user_id,          # 작성자는 요청이 아니라 토큰에서 온다
+            category_id=request.category_id,
             created_at=now,
             updated_at=now,
         )
@@ -125,3 +131,16 @@ class User(Base):    # 회원 테이블
             nickname=nickname,
             created_at=datetime.now(timezone.utc),
         )
+        
+class Category(Base):    # 글 분류 (사이드바)
+    __tablename__ = "categories"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    slug: Mapped[str] = mapped_column(String(32), unique=True, index=True)  # URL에 쓰는 이름
+    name: Mapped[str] = mapped_column(String(32), unique=True)              # 화면에 보이는 이름
+    display_order: Mapped[int] = mapped_column(default=0)
+
+    posts: Mapped[list["Post"]] = relationship(back_populates="category")
+
+    def __repr__(self):
+        return f"Category(id={self.id}, slug={self.slug})"
