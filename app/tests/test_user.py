@@ -6,25 +6,31 @@
 
 2026-07-24
 httpOnly 쿠키 로그인 / 로그아웃
-등급 반영
+권한 반영
 '''
 
 import jwt
 import pytest
 from datetime import datetime, timedelta, timezone
 from app.database.connection import settings
-from app.database.orm import User, UserRole
+from app.database.orm import User
 from app.service.auth import AuthService
 
 
-def _make_user(id=1, email="test@example.com", nickname="tester", role=UserRole.MEMBER):
+def _make_user(id=1, email="test@example.com", nickname="tester"):
     return User(
         id=id,
         email=email,
         password="$2b$12$fakehashedpassword",
         nickname=nickname,
         is_verified=False,
-        role=role,
+        can_comment=True,
+        can_write_post=False,
+        can_upload=False,
+        can_manage_category=False,
+        can_manage_user=False,
+        suspended_until=None,
+        is_banned=False,
         created_at=datetime(2026, 7, 23, tzinfo=timezone.utc),
     )
 
@@ -46,7 +52,8 @@ def test_sign_up(client, mock_user_repo):
     assert data["email"] == "test@example.com"
     assert data["nickname"] == "tester"
     assert data["is_verified"] is False
-    assert data["role"] == "member"
+    assert data["can_comment"] is True
+    assert data["can_write_post"] is False
     assert "password" not in data          # 비번이 응답에 새면 안 된다
     mock_user_repo.save_user.assert_called_once()
 
@@ -139,7 +146,7 @@ def test_log_in(client, mock_user_repo):
 
     assert response.status_code == 200
     assert response.json()["nickname"] == "tester"
-    assert response.json()["role"] == "member"
+    assert response.json()["can_comment"] is True
     assert "password" not in response.json()
     assert "access_token" not in response.text      # 토큰이 본문에 새면 안 된다
 
@@ -178,6 +185,23 @@ def test_log_in_no_such_email(client, mock_user_repo):
     assert response.json()["detail"] == "invalid email or password"
 
 
+def test_banned_can_still_log_in(client, mock_user_repo):
+    """본인이 제재 상태를 확인할 수 있어야 하므로 로그인은 막지 않는다"""
+    service = AuthService()
+    user = _make_user()
+    user.password = service.hash_password("password123")
+    user.is_banned = True
+    mock_user_repo.get_user_by_email.return_value = user
+
+    response = client.post(
+        "/user/log-in",
+        json={"email": "test@example.com", "password": "password123"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["is_banned"] is True
+
+
 # ---------- 로그아웃 ----------
 
 def test_log_out(client):
@@ -201,7 +225,7 @@ def test_get_me(client, mock_user_repo):
     assert response.status_code == 200
     data = response.json()
     assert data["email"] == "test@example.com"
-    assert data["role"] == "member"
+    assert data["is_suspended"] is False
     assert "password" not in data
 
 

@@ -10,7 +10,9 @@ let editor = null;
 
 // 확인이 끝날 때까지 폼을 숨겨둔다. 먼저 그리면 잠깐 보였다 사라진다
 async function init() {
-    const user = await requireAdminUser(guard);
+    const user = await requirePermission(
+        guard, "can_write_post", "글쓰기 권한이 없습니다."
+    );
     if (!user) return;
 
     try {

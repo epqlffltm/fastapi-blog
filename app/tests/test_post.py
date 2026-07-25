@@ -8,19 +8,21 @@
 인증/권한 반영
 
 2026-07-24
-분류 반영
-이미지 제거 / 썸네일 반영
-글 작성은 관리자만
+분류 반영 / 이미지 제거 / 썸네일
+권한 체크박스 반영
 '''
 
 from datetime import datetime, timezone
-from app.database.orm import Post, User, Category, UserRole
+from app.database.orm import Post, User, Category
 
 
 def _make_user(id=1, nickname="tester"):
     return User(
         id=id, email=f"{nickname}@example.com", password="hash",
-        nickname=nickname, is_verified=True, role=UserRole.ADMIN,
+        nickname=nickname, is_verified=True,
+        can_comment=True, can_write_post=True, can_upload=True,
+        can_manage_category=True, can_manage_user=True,
+        suspended_until=None, is_banned=False,
         created_at=datetime(2026, 7, 23, tzinfo=timezone.utc),
     )
 
@@ -191,14 +193,14 @@ def test_create_post_unknown_category(admin_client, mock_post_repo, mock_categor
     mock_post_repo.save.assert_not_called()
 
 
-def test_create_post_as_member(auth_client, mock_post_repo, mock_category_repo):
-    """일반 회원은 글을 쓸 수 없다 (댓글만)"""
+def test_create_post_without_permission(auth_client, mock_post_repo, mock_category_repo):
+    """댓글만 가능한 회원은 글을 쓸 수 없다"""
     response = auth_client.post(
         "/page", json={"title": "글", "contents": "본문", "category_id": 1}
     )
 
     assert response.status_code == 403
-    assert response.json()["detail"] == "admin only"
+    assert response.json()["detail"] == "permission denied: can_write_post"
     mock_post_repo.save.assert_not_called()
 
 
@@ -222,6 +224,7 @@ def test_create_post_missing_field(admin_client, mock_post_repo, mock_category_r
 # ---------- 수정 ----------
 
 def test_update_post(auth_client, mock_post_repo):
+    """권한이 없어도 이미 쓴 자기 글은 고칠 수 있다"""
     post = _make_post(user_id=1)          # 내 글
     mock_post_repo.get_post_by_id.return_value = post
     mock_post_repo.update.return_value = post
@@ -255,6 +258,17 @@ def test_update_post_not_mine(auth_client, mock_post_repo):
     mock_post_repo.update.assert_not_called()
 
 
+def test_update_post_when_suspended(suspended_client, mock_post_repo):
+    """제재 중엔 새 내용을 만들 수 없다"""
+    mock_post_repo.get_post_by_id.return_value = _make_post(user_id=1)
+
+    response = suspended_client.patch("/page/1", json={"title": "수정"})
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "suspended"
+    mock_post_repo.update.assert_not_called()
+
+
 def test_update_post_not_found(auth_client, mock_post_repo):
     mock_post_repo.get_post_by_id.return_value = None
 
@@ -274,6 +288,17 @@ def test_delete_post(auth_client, mock_post_repo):
     assert response.status_code == 204
     assert post.is_deleted is True          # 소프트삭제 표시됐나
     mock_post_repo.update.assert_called_once()
+
+
+def test_delete_post_when_banned(banned_client, mock_post_repo):
+    """지우는 건 제재 중에도 허용한다"""
+    post = _make_post(user_id=1)
+    mock_post_repo.get_post_by_id.return_value = post
+
+    response = banned_client.delete("/page/1")
+
+    assert response.status_code == 204
+    assert post.is_deleted is True
 
 
 def test_delete_post_not_mine(auth_client, mock_post_repo):

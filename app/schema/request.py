@@ -12,11 +12,10 @@ nickname 제거 (작성자는 토큰에서)
 글 작성에 category_id 추가
 이미지는 본문(마크다운)에 들어가므로 image 필드 제거
 댓글에 parent_id 추가 (대댓글)
-분류 생성 / 등급 변경
+분류 생성 / 권한 · 정지 · 강퇴
 '''
 
 from pydantic import BaseModel, EmailStr, Field
-from ..database.orm import UserRole
 
 
 class ContentCreate(BaseModel):
@@ -65,5 +64,18 @@ class CategoryCreate(BaseModel):
     display_order: int = 0
 
 
-class RoleUpdateRequest(BaseModel):
-    role: UserRole      # enum 이라 정해진 값 외에는 스키마에서 걸린다
+class PermissionUpdateRequest(BaseModel):
+    # 전부 선택. 체크박스 하나를 눌러도 그 하나만 보내면 된다
+    can_comment: bool | None = None
+    can_write_post: bool | None = None
+    can_upload: bool | None = None
+    can_manage_category: bool | None = None
+    can_manage_user: bool | None = None
+
+
+class SuspendRequest(BaseModel):
+    days: int = Field(ge=0, le=3650)      # 0 이면 정지 해제
+
+
+class BanRequest(BaseModel):
+    banned: bool

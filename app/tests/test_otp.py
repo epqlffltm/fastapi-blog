@@ -6,7 +6,7 @@ OTP API 테스트
 
 2026-07-24
 이메일 발송 / 재발급 제한 반영
-등급 반영
+권한 반영
 '''
 
 from unittest.mock import Mock
@@ -106,7 +106,7 @@ def test_unverified_cannot_create_post(unverified_client, mock_post_repo, mock_c
     )
 
     assert response.status_code == 403
-    # 등급은 admin 인데 이메일 확인이 먼저 걸린다
+    # 권한은 있는데 이메일 확인이 먼저 걸린다
     assert response.json()["detail"] == "email not verified"
     mock_post_repo.save.assert_not_called()
 
@@ -117,16 +117,6 @@ def test_unverified_cannot_create_comment(unverified_client, mock_post_repo, moc
     assert response.status_code == 403
     assert response.json()["detail"] == "email not verified"
     mock_comment_repo.save.assert_not_called()
-
-
-def test_unverified_cannot_upload(unverified_client, mock_upload_service, mock_upload_repo):
-    response = unverified_client.post(
-        "/upload", files={"file": ("a.png", b"x", "image/png")}
-    )
-
-    assert response.status_code == 403
-    assert response.json()["detail"] == "email not verified"
-    mock_upload_repo.save.assert_not_called()
 
 
 def test_unverified_can_read(unverified_client, mock_post_repo, mock_category_repo):

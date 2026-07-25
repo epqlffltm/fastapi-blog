@@ -14,24 +14,9 @@ function showGuard(guardEl, message, href, linkText) {
     guardEl.append(link);
 }
 
-// 로그인·이메일 인증 확인. 통과하면 user, 아니면 안내를 그리고 null
-async function requireVerifiedUser(guardEl) {
-    const user = await renderHeader();
-
-    if (!user) {
-        showGuard(guardEl, "로그인이 필요합니다.", "/login", "로그인하기");
-        return null;
-    }
-    if (!user.is_verified) {
-        // 서버가 403으로 막지만, 다 써놓고 거절당하는 것보다 미리 알리는 편이 낫다
-        showGuard(guardEl, "이메일 인증이 필요합니다.", "/signup", "인증하기");
-        return null;
-    }
-    return user;
-}
-
-// 관리자 확인. 글쓰기·수정 화면이 쓴다
-async function requireAdminUser(guardEl) {
+// 로그인 → 이메일 인증 → 제재 → 권한 순으로 확인한다.
+// 서버와 같은 순서라 화면과 실제 결과가 어긋나지 않는다
+async function requirePermission(guardEl, permission, deniedMessage) {
     const user = await renderHeader();
 
     if (!user) {
@@ -42,8 +27,17 @@ async function requireAdminUser(guardEl) {
         showGuard(guardEl, "이메일 인증이 필요합니다.", "/signup", "인증하기");
         return null;
     }
-    if (!isAdmin(user)) {
-        guardEl.textContent = "글은 관리자만 쓸 수 있습니다.";
+    if (user.is_banned) {
+        guardEl.textContent = "이용이 정지된 계정입니다.";
+        return null;
+    }
+    if (user.is_suspended) {
+        guardEl.textContent =
+            `${formatDate(user.suspended_until)} 까지 이용이 제한된 계정입니다.`;
+        return null;
+    }
+    if (!can(user, permission)) {
+        guardEl.textContent = deniedMessage;
         return null;
     }
     return user;

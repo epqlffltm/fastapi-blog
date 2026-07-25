@@ -2,21 +2,23 @@
 
 '''
 2026-07-24
-등급 부여 스크립트 (최초 관리자 지정용)
+권한 부여 스크립트 (최초 관리자 지정용)
 
-등급은 관리자만 바꿀 수 있는데, 새 DB 에는 관리자가 없다.
+권한은 can_manage_user 를 가진 사람만 바꿀 수 있는데,
+새 DB 에는 그런 사람이 없다. 그 닭과 달걀을 끊는 유일한 통로다.
+서버 밖에서만 실행된다.
 
-    uv run python -m app.promote hong@example.com
-    uv run python -m app.promote hong@example.com member
+    uv run python -m app.promote hong@example.com           # 모든 권한
+    uv run python -m app.promote hong@example.com revoke    # 댓글만 남김
 '''
 
 import sys
-from .database.connection import SessionFactory
-from .database.orm import User, UserRole
 from sqlalchemy import select
+from .database.connection import SessionFactory
+from .database.orm import User, PERMISSIONS
 
 
-def promote(email: str, role: str) -> None:
+def promote(email: str, revoke: bool) -> None:
     session = SessionFactory()
     try:
         user = session.scalar(select(User).where(User.email == email))
@@ -24,21 +26,25 @@ def promote(email: str, role: str) -> None:
             print(f"그런 계정이 없습니다: {email}")
             return
 
-        user.role = role
+        if revoke:
+            user.revoke_all()
+            user.can_comment = True
+        else:
+            user.grant_all()
+            user.is_verified = True     # 권한만 주고 인증이 막혀 있으면 쓸모가 없다
+            user.is_banned = False
+            user.suspended_until = None
+
         session.commit()
-        print(f"{email} → {role}")
+        granted = [label for name, label in PERMISSIONS if getattr(user, name)]
+        print(f"{email} → {', '.join(granted) or '권한 없음'}")
     finally:
         session.close()
 
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("사용법: uv run python -m app.promote <email> [admin|member]")
+        print("사용법: uv run python -m app.promote <email> [revoke]")
         sys.exit(1)
 
-    target_role = sys.argv[2] if len(sys.argv) > 2 else UserRole.ADMIN
-    if target_role not in tuple(UserRole):
-        print(f"등급은 {[r.value for r in UserRole]} 중 하나여야 합니다")
-        sys.exit(1)
-
-    promote(sys.argv[1], target_role)
+    promote(sys.argv[1], revoke=(len(sys.argv) > 2 and sys.argv[2] == "revoke"))

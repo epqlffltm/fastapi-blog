@@ -54,12 +54,12 @@ def test_create_category(admin_client, mock_category_repo):
     mock_category_repo.save.assert_called_once()
 
 
-def test_create_category_as_member(auth_client, mock_category_repo):
-    """사이드바 구성은 관리자만"""
+def test_create_category_without_permission(auth_client, mock_category_repo):
+    """사이드바 구성은 분류 관리 권한이 있어야 한다"""
     response = auth_client.post("/categories", json={"slug": "book", "name": "독서"})
 
     assert response.status_code == 403
-    assert response.json()["detail"] == "admin only"
+    assert response.json()["detail"] == "permission denied: can_manage_category"
     mock_category_repo.save.assert_not_called()
 
 

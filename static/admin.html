@@ -18,13 +18,13 @@
         <div id="admin" hidden>
             <h1>관리</h1>
 
-            <section class="admin-section">
+            <section class="admin-section" id="category-section" hidden>
                 <h2>분류 추가</h2>
                 <form id="category-form">
                     <div class="field">
                         <label for="slug">주소 (영소문자·숫자·하이픈)</label>
                         <input type="text" id="slug" required pattern="[a-z0-9\-]+"
-                               maxlength="32" placeholder="book">
+                            maxlength="32" placeholder="book">
                     </div>
                     <div class="field">
                         <label for="name">표시 이름</label>
@@ -41,20 +41,10 @@
                 <ul class="category-list admin-categories" id="category-list"></ul>
             </section>
 
-            <section class="admin-section">
-                <h2>회원 등급</h2>
+            <section class="admin-section" id="user-section" hidden>
+                <h2>회원</h2>
                 <p class="error" id="user-error"></p>
-                <table class="user-table">
-                    <thead>
-                        <tr>
-                            <th>닉네임</th>
-                            <th>이메일</th>
-                            <th>인증</th>
-                            <th>등급</th>
-                        </tr>
-                    </thead>
-                    <tbody id="user-body"></tbody>
-                </table>
+                <div id="user-list"></div>
             </section>
         </div>
 

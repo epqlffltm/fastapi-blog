@@ -12,7 +12,7 @@ repository 패턴 적용
 분류 필터 / 분류 검증
 본문 마크다운화 + 썸네일 추출
 대댓글 표시 규칙 적용
-글 작성은 관리자만
+권한 체크박스 연동
 '''
 
 from fastapi import APIRouter, Depends, HTTPException, Body
@@ -27,7 +27,7 @@ from ..schema.response import (
 )
 from ..service.comment import visible_comments
 from ..service.markdown import extract_first_image
-from .dependency import get_current_user, get_admin_user
+from .dependency import get_current_user, get_active_user, require_permission
 
 router = APIRouter(tags=["post"])
 
@@ -83,7 +83,7 @@ def get_page_handler(
 @router.post("/page", status_code=201, response_model=PostDetailSchema)#본문 쓰기
 def create_post_handler(
     request: PostCreate,
-    current_user: User = Depends(get_admin_user),   # 글은 관리자만
+    current_user: User = Depends(require_permission("can_write_post")),
     post_repo: PostRepository = Depends(),
     category_repo: CategoryRepository = Depends(),
 ):
@@ -102,8 +102,9 @@ def update_post_handler(
     id: int,
     title: Optional[str] = Body(None, embed=True),
     contents: Optional[str] = Body(None, embed=True),
-    # 등급이 내려가도 자기가 쓴 글은 정리할 수 있어야 하므로 소유권만 본다
-    current_user: User = Depends(get_current_user),
+    # 수정은 새 내용을 만드는 일이므로 제재 중엔 막는다.
+    # 권한이 꺼져도 이미 쓴 글은 고칠 수 있게 소유권만 본다
+    current_user: User = Depends(get_active_user),
     post_repo: PostRepository = Depends(),
 ):
     post = post_repo.get_post_by_id(id)
@@ -127,6 +128,7 @@ def update_post_handler(
 @router.delete("/page/{id}", status_code=204)#본문 삭제
 def delete_post_handler(
     id: int,
+    # 지우는 건 언제나 허용한다. 제재 중이라고 자기 글을 못 내리게 할 이유가 없다
     current_user: User = Depends(get_current_user),
     post_repo: PostRepository = Depends(),
 ):

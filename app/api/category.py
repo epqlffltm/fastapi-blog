@@ -10,7 +10,7 @@ from ..database.orm import Category, User
 from ..database.repository import CategoryRepository
 from ..schema.request import CategoryCreate
 from ..schema.response import CategoryListItemSchema, CategorySchema, ListCategorySchema
-from .dependency import get_admin_user
+from .dependency import require_permission
 
 router = APIRouter(tags=["category"])
 
@@ -37,7 +37,7 @@ def get_categories_handler(
 @router.post("/categories", status_code=201, response_model=CategorySchema)#분류 추가
 def create_category_handler(
     request: CategoryCreate,
-    current_user: User = Depends(get_admin_user),   # 사이드바 구성은 관리자만
+    current_user: User = Depends(require_permission("can_manage_category")),
     category_repo: CategoryRepository = Depends(),
 ):
     if category_repo.get_category_by_slug(request.slug) is not None:

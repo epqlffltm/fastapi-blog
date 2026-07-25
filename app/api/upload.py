@@ -10,7 +10,7 @@ from ..database.orm import Upload, User
 from ..database.repository import UploadRepository
 from ..schema.response import UploadSchema
 from ..service.upload import UploadService
-from .dependency import get_admin_user
+from .dependency import require_permission
 
 router = APIRouter(tags=["upload"])
 
@@ -18,9 +18,8 @@ router = APIRouter(tags=["upload"])
 @router.post("/upload", status_code=201, response_model=UploadSchema)#파일 업로드
 async def upload_handler(
     file: UploadFile,
-    # 이미지는 글 본문에만 쓰이므로 글을 쓸 수 있는 등급만 올릴 수 있다.
-    # 열어두면 아무나 디스크를 채울 수 있다
-    current_user: User = Depends(get_admin_user),
+    # 열어두면 아무나 디스크를 채울 수 있으므로 권한을 따로 둔다
+    current_user: User = Depends(require_permission("can_upload")),
     upload_service: UploadService = Depends(),
     upload_repo: UploadRepository = Depends(),
 ):

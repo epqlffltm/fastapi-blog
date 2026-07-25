@@ -11,7 +11,8 @@ const postId = new URLSearchParams(location.search).get("id");
 let editor = null;
 
 async function init() {
-    const user = await requireAdminUser(guard);
+    // 수정은 권한이 꺼져도 자기 글이면 되므로, 제재 여부만 확인한다
+    const user = await requirePermission(guard, "is_verified", "수정할 수 없습니다.");
     if (!user) return;
 
     if (!postId) {

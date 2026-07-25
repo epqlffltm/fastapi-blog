@@ -16,21 +16,27 @@ nickname → user_id FK 전환
 분류(categories) 테이블 추가
 images → uploads (업로드 파일 기록) 전환, 본문 썸네일
 대댓글 (parent_id 자기참조 FK, 1단계)
-회원 등급 (role)
+role → 권한 체크박스 / 정지 · 강퇴
 '''
 
-from enum import StrEnum
 from sqlalchemy import ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime, timezone
 from .connection import Base    # connection의 Base 재사용 (새로 만들지 않음)
 
 
-class UserRole(StrEnum):
-    # 값을 문자열로 저장한다. 정수로 두면 나중에 등급이 늘 때
-    # 순서를 비집고 넣어야 하고, DB를 눈으로 볼 때도 뜻이 안 보인다
-    ADMIN = "admin"      # 글 작성 / 분류 관리 / 등급 변경
-    MEMBER = "member"    # 댓글만
+# 관리 화면의 체크박스와 1:1. 순서가 곧 화면 순서다.
+# 새 권한을 추가하려면 여기에 한 줄 넣고, User에 같은 이름의 컬럼을 추가하고,
+# request.PermissionUpdateRequest / response.UserSchema 에도 같은 필드를 더한다
+PERMISSIONS: tuple[tuple[str, str], ...] = (
+    ("can_comment", "댓글"),
+    ("can_write_post", "글쓰기"),
+    ("can_upload", "이미지 업로드"),
+    ("can_manage_category", "분류 관리"),
+    ("can_manage_user", "회원 관리"),
+)
+
+PERMISSION_NAMES: tuple[str, ...] = tuple(name for name, _ in PERMISSIONS)
 
 
 class Post(Base):
@@ -139,28 +145,64 @@ class User(Base):    # 회원 테이블
     password: Mapped[str] = mapped_column(String(256))
     nickname: Mapped[str] = mapped_column(String(64), unique=True)
     is_verified: Mapped[bool] = mapped_column(default=False)
-    role: Mapped[str] = mapped_column(String(16), default=UserRole.MEMBER)
     created_at: Mapped[datetime]
+
+    # 권한 — 등급 하나가 아니라 기능별로 켜고 끈다.
+    # 새 기능이 생기면 컬럼 하나만 늘리면 되고, 등급표를 다시 짤 필요가 없다
+    can_comment: Mapped[bool] = mapped_column(default=True)
+    can_write_post: Mapped[bool] = mapped_column(default=False)
+    can_upload: Mapped[bool] = mapped_column(default=False)
+    can_manage_category: Mapped[bool] = mapped_column(default=False)
+    can_manage_user: Mapped[bool] = mapped_column(default=False)
+
+    # 제재 — 정지는 기한이 지나면 저절로 풀리고, 강퇴는 사람이 풀어야 한다
+    suspended_until: Mapped[datetime | None] = mapped_column(default=None)
+    is_banned: Mapped[bool] = mapped_column(default=False)
 
     posts: Mapped[list["Post"]] = relationship(back_populates="user")
     comments: Mapped[list["Comment"]] = relationship(back_populates="user")
 
     def __repr__(self):
-        return f"User(id={self.id}, email={self.email}, role={self.role})"
+        return f"User(id={self.id}, email={self.email})"
 
     @property
-    def is_admin(self) -> bool:
-        return self.role == UserRole.ADMIN
+    def is_suspended(self) -> bool:
+        if self.suspended_until is None:
+            return False
+        until = self.suspended_until
+        # 컬럼이 TIMESTAMP WITHOUT TIME ZONE 이라 DB 에서 읽으면 시간대가 없다.
+        # 넣을 때 항상 UTC 이므로 그렇게 간주하고 비교한다 (안 맞추면 TypeError)
+        if until.tzinfo is None:
+            until = until.replace(tzinfo=timezone.utc)
+        return until > datetime.now(timezone.utc)
+
+    @property
+    def is_active(self) -> bool:
+        return not self.is_banned and not self.is_suspended
+
+    def grant_all(self) -> None:
+        for name in PERMISSION_NAMES:
+            setattr(self, name, True)
+
+    def revoke_all(self) -> None:
+        for name in PERMISSION_NAMES:
+            setattr(self, name, False)
 
     @classmethod
     def create(cls, email: str, hashed_password: str, nickname: str) -> "User":
         # 반드시 해싱된 비번을 받는다 (평문 저장 금지)
-        # 가입은 언제나 최하위 등급. 올리는 건 관리자만 할 수 있다
+        # 가입 직후엔 댓글만. 나머지는 관리자가 켜준다
         return cls(
             email=email,
             password=hashed_password,
             nickname=nickname,
-            role=UserRole.MEMBER,
+            can_comment=True,
+            can_write_post=False,
+            can_upload=False,
+            can_manage_category=False,
+            can_manage_user=False,
+            suspended_until=None,
+            is_banned=False,
             created_at=datetime.now(timezone.utc),
         )
 

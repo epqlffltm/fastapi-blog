@@ -20,16 +20,15 @@ from ..database.orm import Comment, User
 from ..schema.request import CommentCreate
 from ..schema.response import PostDetailSchema
 from ..service.comment import visible_comments
-from .dependency import get_current_user, get_verified_user
+from .dependency import get_current_user, get_active_user, require_permission
 
 router = APIRouter(tags=["comment"])
-
 
 @router.post("/page/{post_id}/comment", status_code=201, response_model=PostDetailSchema)#댓글 쓰기
 def create_comment_handler(
     post_id: int,
     request: CommentCreate,
-    current_user: User = Depends(get_verified_user),   # 이메일 인증된 회원만
+    current_user: User = Depends(require_permission("can_comment")),
     post_repo: PostRepository = Depends(),
     comment_repo: CommentRepository = Depends(),
 ):
@@ -61,7 +60,8 @@ def create_comment_handler(
 def update_comment_handler(
     id: int,
     contents: str = Body(..., embed=True),
-    current_user: User = Depends(get_current_user),
+    # 수정은 새 내용을 만드는 일이므로 제재 중엔 막는다
+    current_user: User = Depends(get_active_user),
     comment_repo: CommentRepository = Depends(),
 ):
     comment = comment_repo.get_comment_by_id(id)

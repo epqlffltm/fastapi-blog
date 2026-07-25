@@ -11,12 +11,12 @@
 시드 계정은 인증됨으로 생성
 분류(사이드바) 추가
 본문을 마크다운으로 / 대댓글 예시 추가
-회원 등급 / dnd 밈 3개
+권한 체크박스 / dnd 밈 3개
 '''
 
 from datetime import datetime
 from .database.connection import SessionFactory
-from .database.orm import Post, Comment, User, Category, UserRole
+from .database.orm import Post, Comment, User, Category
 from .service.auth import AuthService
 from .service.markdown import extract_first_image
 
@@ -29,17 +29,17 @@ categories_data = [
 ]
 
 # 시드 계정 (비번은 전부 seedpass123)
-# 글쓴이는 관리자, 나머지는 일반 회원
+# admin=True 면 모든 권한, 아니면 댓글만
 users_data = [
-    {"nickname": "hong", "role": UserRole.ADMIN},
-    {"nickname": "gil", "role": UserRole.ADMIN},
-    {"nickname": "dong", "role": UserRole.ADMIN},
-    {"nickname": "kim", "role": UserRole.MEMBER},
-    {"nickname": "lee", "role": UserRole.MEMBER},
-    {"nickname": "park", "role": UserRole.MEMBER},
-    {"nickname": "choi", "role": UserRole.MEMBER},
-    {"nickname": "jung", "role": UserRole.MEMBER},
-    {"nickname": "yoon", "role": UserRole.MEMBER},
+    {"nickname": "hong", "admin": True},
+    {"nickname": "gil", "admin": True},
+    {"nickname": "dong", "admin": True},
+    {"nickname": "kim", "admin": False},
+    {"nickname": "lee", "admin": False},
+    {"nickname": "park", "admin": False},
+    {"nickname": "choi", "admin": False},
+    {"nickname": "jung", "admin": False},
+    {"nickname": "yoon", "admin": False},
 ]
 
 # reply_to: 같은 글 안에서 몇 번째 댓글에 달린 답글인지 (0부터). None 이면 원댓글
@@ -150,7 +150,8 @@ def seed():
                 nickname=udata["nickname"],
             )
             user.is_verified = True      # 시드 계정은 인증된 것으로
-            user.role = udata["role"]
+            if udata["admin"]:
+                user.grant_all()
             session.add(user)
             nickname_to_user[udata["nickname"]] = user
 
@@ -191,7 +192,7 @@ def seed():
                 created.append(comment)
 
         session.commit()
-        print("시드 완료 (분류 3개 / 계정 9개, 관리자 hong·gil·dong / 비번 seedpass123)")
+        print("시드 완료 (분류 3개 / 계정 9개, 전권 hong·gil·dong / 비번 seedpass123)")
     finally:
         session.close()
 

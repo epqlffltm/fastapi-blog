@@ -3,7 +3,6 @@
 '''
 2026-07-24
 파일 업로드 API / 마크다운 추출 테스트
-업로드는 관리자만
 '''
 
 from app.service.markdown import extract_first_image
@@ -39,12 +38,12 @@ def test_upload_records_original_name(admin_client, mock_upload_service, mock_up
     assert saved.user_id == 1
 
 
-def test_upload_as_member(auth_client, mock_upload_service, mock_upload_repo):
-    """이미지는 글 본문에만 쓰이므로 일반 회원은 올릴 수 없다"""
+def test_upload_without_permission(auth_client, mock_upload_service, mock_upload_repo):
+    """업로드 권한이 없으면 디스크를 채울 수 없다"""
     response = auth_client.post("/upload", files={"file": ("a.png", b"x", "image/png")})
 
     assert response.status_code == 403
-    assert response.json()["detail"] == "admin only"
+    assert response.json()["detail"] == "permission denied: can_upload"
     mock_upload_repo.save.assert_not_called()
 
 
@@ -56,13 +55,23 @@ def test_upload_without_token(client, mock_upload_service, mock_upload_repo):
 
 
 def test_upload_unverified(unverified_client, mock_upload_service, mock_upload_repo):
-    """이메일 인증 전에는 업로드할 수 없다 (등급보다 먼저 걸린다)"""
+    """이메일 인증 전에는 업로드할 수 없다 (권한보다 먼저 걸린다)"""
     response = unverified_client.post(
         "/upload", files={"file": ("a.png", b"x", "image/png")}
     )
 
     assert response.status_code == 403
     assert response.json()["detail"] == "email not verified"
+    mock_upload_repo.save.assert_not_called()
+
+
+def test_upload_when_suspended(suspended_client, mock_upload_service, mock_upload_repo):
+    response = suspended_client.post(
+        "/upload", files={"file": ("a.png", b"x", "image/png")}
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "suspended"
     mock_upload_repo.save.assert_not_called()
 
 

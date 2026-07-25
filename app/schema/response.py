@@ -13,7 +13,7 @@ get 단일 조회 api
 분류 스키마 추가
 이미지 스키마 제거 / 목록에 썸네일 추가
 대댓글 (parent_id) 및 삭제 자리표시자
-회원 등급 / 회원 목록
+권한 · 제재
 '''
 
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -109,11 +109,20 @@ class UserSchema(BaseModel):
     email: str
     nickname: str
     is_verified: bool
-    role: str
+
+    can_comment: bool
+    can_write_post: bool
+    can_upload: bool
+    can_manage_category: bool
+    can_manage_user: bool
+
+    suspended_until: datetime | None
+    is_banned: bool
+    is_suspended: bool      # 모델의 property. 기한이 지났는지까지 계산돼 나온다
     # password 는 절대 포함하지 않는다
 
 
-# 관리 화면용 회원 목록 (관리자만 볼 수 있다)
+# 관리 화면용 회원 목록
 class ListUserSchema(BaseModel):
     users: list[UserSchema]
 

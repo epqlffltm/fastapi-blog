@@ -10,16 +10,16 @@
 2026-07-24
 이메일/미인증 fixture 추가
 분류 / 업로드 fixture 추가
-등급 fixture 추가
+권한 · 제재 fixture 추가
 '''
 
 import pytest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
 from unittest.mock import AsyncMock, Mock
 from redis import Redis
 from app.main import app
-from app.database.orm import User, UserRole
+from app.database.orm import User
 from app.database.repository import (
     PostRepository, CommentRepository, UserRepository,
     CategoryRepository, UploadRepository,
@@ -37,21 +37,27 @@ def client():
 
 @pytest.fixture
 def current_user():
-    # 기본은 일반 회원. 관리자 권한이 필요한 테스트는 admin_client 를 쓴다
+    # 기본은 댓글만 가능한 회원. 더 필요한 테스트는 admin_client 를 쓴다
     return User(
         id=1,
         email="test@example.com",
         password="$2b$12$fakehashedpassword",
         nickname="tester",
         is_verified=True,
-        role=UserRole.MEMBER,
+        can_comment=True,
+        can_write_post=False,
+        can_upload=False,
+        can_manage_category=False,
+        can_manage_user=False,
+        suspended_until=None,
+        is_banned=False,
         created_at=datetime(2026, 7, 23, tzinfo=timezone.utc),
     )
 
 
 @pytest.fixture
 def auth_client(client, current_user):
-    """로그인된 일반 회원 (get_current_user를 고정 유저로 교체)"""
+    """로그인된 일반 회원 (댓글만)"""
     app.dependency_overrides[get_current_user] = lambda: current_user
     yield client
     app.dependency_overrides.clear()
@@ -59,8 +65,8 @@ def auth_client(client, current_user):
 
 @pytest.fixture
 def admin_client(client, current_user):
-    """로그인된 관리자"""
-    current_user.role = UserRole.ADMIN
+    """모든 권한을 가진 회원"""
+    current_user.grant_all()
     app.dependency_overrides[get_current_user] = lambda: current_user
     yield client
     app.dependency_overrides.clear()
@@ -68,9 +74,29 @@ def admin_client(client, current_user):
 
 @pytest.fixture
 def unverified_client(client, current_user):
-    """이메일 미인증 상태의 클라이언트"""
+    """이메일 미인증 상태 (권한은 있지만 인증에서 먼저 걸린다)"""
+    current_user.grant_all()
     current_user.is_verified = False
-    current_user.role = UserRole.ADMIN     # 등급이 아니라 인증에서 걸리는지 보려고
+    app.dependency_overrides[get_current_user] = lambda: current_user
+    yield client
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def suspended_client(client, current_user):
+    """기간 정지된 회원 (권한은 있지만 제재에서 걸린다)"""
+    current_user.grant_all()
+    current_user.suspended_until = datetime.now(timezone.utc) + timedelta(days=1)
+    app.dependency_overrides[get_current_user] = lambda: current_user
+    yield client
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def banned_client(client, current_user):
+    """강퇴된 회원"""
+    current_user.grant_all()
+    current_user.is_banned = True
     app.dependency_overrides[get_current_user] = lambda: current_user
     yield client
     app.dependency_overrides.clear()

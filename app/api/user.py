@@ -7,22 +7,24 @@
 2026-07-24
 OTP 발급/검증, 비밀번호 재설정
 httpOnly 쿠키 로그인 / 로그아웃
-회원 목록 · 등급 변경 (관리자)
+회원 목록 · 권한 · 정지 · 강퇴
 '''
 
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
 from ..database.connection import settings
 from ..database.orm import User
 from ..database.repository import UserRepository
 from ..schema.request import (
     SignUpRequest, LogInRequest, VerifyOTPRequest,
-    ResetPasswordRequest, ResetPasswordVerifyRequest, RoleUpdateRequest,
+    ResetPasswordRequest, ResetPasswordVerifyRequest,
+    PermissionUpdateRequest, SuspendRequest, BanRequest,
 )
 from ..schema.response import ListUserSchema, UserSchema
 from ..service.auth import AuthService
 from ..service.email import EmailService
 from ..service.otp import OTPService
-from .dependency import get_current_user, get_admin_user, COOKIE_NAME
+from .dependency import get_current_user, require_permission, COOKIE_NAME
 
 router = APIRouter(prefix="/user", tags=["user"])
 
@@ -65,6 +67,7 @@ def log_in_handler(
     if not auth_service.verify_password(request.password, user.password):
         raise HTTPException(status_code=401, detail="invalid email or password")
 
+    # 제재된 계정도 로그인은 시킨다. 본인이 상태를 확인할 수 있어야 한다
     response.set_cookie(
         key=COOKIE_NAME,
         value=auth_service.create_jwt(user.id),
@@ -74,7 +77,7 @@ def log_in_handler(
         max_age=settings.cookie_max_age,
         path="/",
     )
-    return user       # 프론트가 닉네임·등급을 바로 쓸 수 있게 회원 정보를 반환
+    return user       # 프론트가 권한·제재 상태를 바로 쓸 수 있게 회원 정보를 반환
 
 
 @router.post("/log-out", status_code=200)#로그아웃
@@ -97,30 +100,72 @@ def get_me_handler(
     return current_user
 
 
-@router.get("/list", status_code=200, response_model=ListUserSchema)#회원 목록 (관리자)
+@router.get("/list", status_code=200, response_model=ListUserSchema)#회원 목록
 def get_users_handler(
-    current_user: User = Depends(get_admin_user),
+    current_user: User = Depends(require_permission("can_manage_user")),
     user_repo: UserRepository = Depends(),
 ):
     return ListUserSchema(users=user_repo.get_users())
 
 
-@router.patch("/{id}/role", status_code=200, response_model=UserSchema)#등급 변경 (관리자)
-def update_role_handler(
+@router.patch("/{id}/permissions", status_code=200, response_model=UserSchema)#권한 변경
+def update_permissions_handler(
     id: int,
-    request: RoleUpdateRequest,
-    current_user: User = Depends(get_admin_user),
+    request: PermissionUpdateRequest,
+    current_user: User = Depends(require_permission("can_manage_user")),
     user_repo: UserRepository = Depends(),
 ):
-    # 자기 등급은 못 바꾼다. 마지막 관리자가 스스로 강등하면 아무도 되돌릴 수 없다
+    # 자기 권한은 못 바꾼다. 마지막 관리자가 스스로 내리면 아무도 되돌릴 수 없다
     if id == current_user.id:
-        raise HTTPException(status_code=400, detail="cannot change your own role")
+        raise HTTPException(status_code=400, detail="cannot change your own permissions")
 
     user = user_repo.get_user_by_id(id)
     if user is None:
         raise HTTPException(status_code=404, detail="user not found")
 
-    user.role = request.role
+    # 보내온 항목만 반영한다 (None 은 "안 건드림")
+    for name, value in request.model_dump(exclude_none=True).items():
+        setattr(user, name, value)
+
+    return user_repo.update_user(user)
+
+
+@router.patch("/{id}/suspend", status_code=200, response_model=UserSchema)#정지
+def suspend_handler(
+    id: int,
+    request: SuspendRequest,
+    current_user: User = Depends(require_permission("can_manage_user")),
+    user_repo: UserRepository = Depends(),
+):
+    if id == current_user.id:
+        raise HTTPException(status_code=400, detail="cannot suspend yourself")
+
+    user = user_repo.get_user_by_id(id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="user not found")
+
+    user.suspended_until = (
+        None if request.days == 0
+        else datetime.now(timezone.utc) + timedelta(days=request.days)
+    )
+    return user_repo.update_user(user)
+
+
+@router.patch("/{id}/ban", status_code=200, response_model=UserSchema)#강퇴
+def ban_handler(
+    id: int,
+    request: BanRequest,
+    current_user: User = Depends(require_permission("can_manage_user")),
+    user_repo: UserRepository = Depends(),
+):
+    if id == current_user.id:
+        raise HTTPException(status_code=400, detail="cannot ban yourself")
+
+    user = user_repo.get_user_by_id(id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="user not found")
+
+    user.is_banned = request.banned
     return user_repo.update_user(user)
 
 

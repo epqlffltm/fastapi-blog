@@ -19,6 +19,16 @@ const commentGuard = document.getElementById("comment-guard");
 
 let currentUser = null;
 
+// 댓글을 쓸 수 있는 상태인지 (서버 판단과 같은 순서로 본다)
+function canWriteComment() {
+    return (
+        currentUser !== null
+        && currentUser.is_verified
+        && isActive(currentUser)
+        && can(currentUser, "can_comment")
+    );
+}
+
 async function init() {
     currentUser = await renderHeader();
 
@@ -133,7 +143,7 @@ function createCommentActions(comment, li, body) {
     actions.className = "actions";
 
     // 답글은 원댓글에만 달 수 있다 (깊이 1)
-    if (comment.parent_id === null && currentUser && currentUser.is_verified) {
+    if (comment.parent_id === null && canWriteComment()) {
         const reply = document.createElement("button");
         reply.className = "ghost-btn";
         reply.textContent = "답글";
@@ -252,22 +262,41 @@ function startEdit(comment, li, body, actions) {
     cancel.addEventListener("click", () => restore(comment.contents));
 }
 
-// 로그인·인증 상태에 따라 댓글 폼 또는 안내를 보인다
+// 상태에 따라 댓글 폼 또는 안내를 보인다
 function renderCommentForm() {
-    if (currentUser && currentUser.is_verified) {
+    if (canWriteComment()) {
         commentForm.hidden = false;
         return;
     }
 
     commentGuard.hidden = false;
-    const href = currentUser ? "/signup" : "/login";
-    const text = currentUser ? "이메일 인증" : "로그인";
 
-    commentGuard.append(document.createTextNode("댓글을 쓰려면 "));
-    const link = document.createElement("a");
-    link.href = href;
-    link.textContent = text;
-    commentGuard.append(link, document.createTextNode("이 필요합니다."));
+    if (!currentUser) {
+        commentGuard.append(document.createTextNode("댓글을 쓰려면 "));
+        const link = document.createElement("a");
+        link.href = "/login";
+        link.textContent = "로그인";
+        commentGuard.append(link, document.createTextNode("이 필요합니다."));
+        return;
+    }
+    if (!currentUser.is_verified) {
+        commentGuard.append(document.createTextNode("댓글을 쓰려면 "));
+        const link = document.createElement("a");
+        link.href = "/signup";
+        link.textContent = "이메일 인증";
+        commentGuard.append(link, document.createTextNode("이 필요합니다."));
+        return;
+    }
+    if (currentUser.is_banned) {
+        commentGuard.textContent = "이용이 정지된 계정입니다.";
+        return;
+    }
+    if (currentUser.is_suspended) {
+        commentGuard.textContent =
+            `${formatDate(currentUser.suspended_until)} 까지 댓글을 쓸 수 없습니다.`;
+        return;
+    }
+    commentGuard.textContent = "댓글 권한이 없습니다.";
 }
 
 commentForm.addEventListener("submit", async (event) => {

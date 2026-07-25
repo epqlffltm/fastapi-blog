@@ -9,8 +9,17 @@ async function getCurrentUser() {
     }
 }
 
-function isAdmin(user) {
-    return user !== null && user.role === "admin";
+// 화면 표시용 판단. 실제 차단은 언제나 서버가 한다
+function can(user, permission) {
+    return user !== null && user[permission] === true;
+}
+
+function isActive(user) {
+    return user !== null && !user.is_banned && !user.is_suspended;
+}
+
+function canManage(user) {
+    return can(user, "can_manage_user") || can(user, "can_manage_category");
 }
 
 async function renderHeader() {
@@ -21,17 +30,28 @@ async function renderHeader() {
     nav.replaceChildren();
 
     if (user) {
-        // 글쓰기·관리는 관리자에게만 보인다. 실제 차단은 서버가 한다
-        if (isAdmin(user)) {
+        if (can(user, "can_write_post") && isActive(user)) {
             const write = document.createElement("a");
             write.href = "/write";
             write.textContent = "글쓰기";
+            nav.append(write);
+        }
 
+        if (canManage(user) && isActive(user)) {
             const admin = document.createElement("a");
             admin.href = "/admin";
             admin.textContent = "관리";
+            nav.append(admin);
+        }
 
-            nav.append(write, admin);
+        // 제재 상태는 숨기지 않는다. 본인이 알아야 문의할 수 있다
+        if (!isActive(user)) {
+            const state = document.createElement("span");
+            state.className = "state-banner";
+            state.textContent = user.is_banned
+                ? "이용 정지"
+                : `정지 ~${formatDate(user.suspended_until)}`;
+            nav.append(state);
         }
 
         const name = document.createElement("span");

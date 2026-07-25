@@ -6,12 +6,12 @@
 
 2026-07-24
 httpOnly 쿠키에서 토큰을 읽도록 변경
-등급 확인 의존성 추가
+등급 확인 → 권한 체크박스 / 제재(정지·강퇴)로 전환
 '''
 
 import jwt
 from fastapi import Cookie, Depends, HTTPException
-from ..database.orm import User, UserRole
+from ..database.orm import User, PERMISSION_NAMES
 from ..database.repository import UserRepository
 from ..service.auth import AuthService
 
@@ -48,16 +48,36 @@ def get_current_user(
 def get_verified_user(
     current_user: User = Depends(get_current_user),
 ) -> User:
+    # 401(누구인지 모름)과 403(누구인지는 알지만 자격 없음)을 구분한다
     if not current_user.is_verified:
         raise HTTPException(status_code=403, detail="email not verified")
     return current_user
 
 
-def get_admin_user(
+def get_active_user(
     current_user: User = Depends(get_verified_user),
 ) -> User:
-    # 인증 → 이메일 확인 → 등급 순으로 걸러진다.
-    # 401(누구인지 모름)과 403(누구인지는 알지만 권한 없음)이 구분된다
-    if current_user.role != UserRole.ADMIN:
-        raise HTTPException(status_code=403, detail="admin only")
+    # 인증 → 이메일 확인 다음. 제재된 계정은 새 내용을 만들 수 없다.
+    # 강퇴가 정지보다 무거우므로 먼저 본다
+    if current_user.is_banned:
+        raise HTTPException(status_code=403, detail="banned")
+    if current_user.is_suspended:        # 기한이 지났으면 property가 알아서 False
+        raise HTTPException(status_code=403, detail="suspended")
     return current_user
+
+
+def require_permission(permission: str):
+    # 라우터가 데코레이터에서 부르므로, 권한 이름 오타는 서버 기동 시점에 바로 걸린다
+    assert permission in PERMISSION_NAMES, f"unknown permission: {permission}"
+
+    def dependency(
+        current_user: User = Depends(get_active_user),
+    ) -> User:
+        # 게이트 순서: 인증 → 이메일 → 제재 → 권한
+        if not getattr(current_user, permission):
+            raise HTTPException(
+                status_code=403, detail=f"permission denied: {permission}"
+            )
+        return current_user
+
+    return dependency

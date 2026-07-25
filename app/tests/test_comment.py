@@ -10,11 +10,11 @@
 2026-07-24
 분류 반영 / 이미지 제거
 대댓글 (1단계) 및 삭제 자리표시자
-등급 반영
+권한 체크박스 반영
 '''
 
 from datetime import datetime, timedelta, timezone
-from app.database.orm import Post, Comment, User, Category, UserRole
+from app.database.orm import Post, Comment, User, Category
 from app.service.comment import visible_comments
 
 BASE = datetime(2026, 7, 21, tzinfo=timezone.utc)
@@ -23,7 +23,10 @@ BASE = datetime(2026, 7, 21, tzinfo=timezone.utc)
 def _make_user(id=1, nickname="tester"):
     return User(
         id=id, email=f"{nickname}@example.com", password="hash",
-        nickname=nickname, is_verified=True, role=UserRole.MEMBER,
+        nickname=nickname, is_verified=True,
+        can_comment=True, can_write_post=False, can_upload=False,
+        can_manage_category=False, can_manage_user=False,
+        suspended_until=None, is_banned=False,
         created_at=datetime(2026, 7, 23, tzinfo=timezone.utc),
     )
 
@@ -40,7 +43,7 @@ def _make_post(id=1, user_id=1):
 
 
 def _make_comment(id=1, post_id=1, user_id=1, contents="댓글 내용",
-                  parent_id=None, is_deleted=False, minutes=0):
+                parent_id=None, is_deleted=False, minutes=0):
     comment = Comment(
         id=id, post_id=post_id, user_id=user_id, contents=contents,
         parent_id=parent_id, is_deleted=is_deleted,
@@ -54,7 +57,7 @@ def _make_comment(id=1, post_id=1, user_id=1, contents="댓글 내용",
 # ---------- 생성 ----------
 
 def test_create_comment(auth_client, mock_post_repo, mock_comment_repo):
-    """일반 회원도 댓글은 쓸 수 있다"""
+    """댓글 권한만 있어도 쓸 수 있다"""
     mock_post_repo.get_post_by_id.return_value = _make_post()
     mock_comment_repo.save.return_value = _make_comment()
 
@@ -64,6 +67,18 @@ def test_create_comment(auth_client, mock_post_repo, mock_comment_repo):
     mock_comment_repo.save.assert_called_once()
     saved = mock_comment_repo.save.call_args.args[0]
     assert saved.parent_id is None          # 기본은 원댓글
+
+
+def test_create_comment_without_permission(
+    auth_client, current_user, mock_post_repo, mock_comment_repo
+):
+    current_user.can_comment = False
+
+    response = auth_client.post("/page/1/comment", json={"contents": "댓글"})
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "permission denied: can_comment"
+    mock_comment_repo.save.assert_not_called()
 
 
 def test_create_reply(auth_client, mock_post_repo, mock_comment_repo):
@@ -158,6 +173,16 @@ def test_update_comment_not_mine(auth_client, mock_comment_repo):
     mock_comment_repo.update.assert_not_called()
 
 
+def test_update_comment_when_banned(banned_client, mock_comment_repo):
+    """제재 중엔 새 내용을 만들 수 없다"""
+    mock_comment_repo.get_comment_by_id.return_value = _make_comment(user_id=1)
+
+    response = banned_client.patch("/comment/1", json={"contents": "수정"})
+
+    assert response.status_code == 403
+    mock_comment_repo.update.assert_not_called()
+
+
 def test_update_comment_not_found(auth_client, mock_comment_repo):
     mock_comment_repo.get_comment_by_id.return_value = None
 
@@ -177,6 +202,17 @@ def test_delete_comment(auth_client, mock_comment_repo):
     assert response.status_code == 204
     assert comment.is_deleted is True
     mock_comment_repo.update.assert_called_once()
+
+
+def test_delete_comment_when_banned(banned_client, mock_comment_repo):
+    """지우는 건 제재 중에도 허용한다"""
+    comment = _make_comment(user_id=1)
+    mock_comment_repo.get_comment_by_id.return_value = comment
+
+    response = banned_client.delete("/comment/1")
+
+    assert response.status_code == 204
+    assert comment.is_deleted is True
 
 
 def test_delete_comment_not_mine(auth_client, mock_comment_repo):
