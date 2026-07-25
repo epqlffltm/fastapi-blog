@@ -14,6 +14,9 @@ UserRepository 추가
 CategoryRepository 추가 / 목록에 분류 필터
 UploadRepository 추가 (save_with_images 제거)
 회원 목록 / 분류 저장
+
+2026-07-25
+분류 이름 변경 / 삭제(미분류로 재배치 후 삭제) / 글 수 카운트
 '''
 
 from fastapi import Depends
@@ -145,11 +148,33 @@ class CategoryRepository:
     def get_category_by_id(self, id: int) -> Category | None:
         return self.session.scalar(select(Category).where(Category.id == id))
 
+    def count_posts(self, category_id: int) -> int:
+        # 소프트삭제된 글도 category_id 로 FK 를 물고 있으므로 is_deleted 를 가리지 않는다
+        return self.session.scalar(
+            select(func.count(Post.id)).where(Post.category_id == category_id)
+        )
+
     def save(self, category: Category) -> Category:
         self.session.add(category)
         self.session.commit()
         self.session.refresh(category)
         return category
+
+    def update(self, category: Category) -> Category:
+        # 이미 세션이 추적 중인 객체 → commit만
+        self.session.commit()
+        self.session.refresh(category)
+        return category
+
+    def reassign_and_delete(self, category: Category, fallback_id: int) -> None:
+        # 그 분류의 글을 전부 미분류로 옮긴 뒤 빈 분류를 삭제한다.
+        # 소프트삭제된 글도 category_id 로 FK 를 물고 있으므로 is_deleted 를 안 가린다.
+        # 두 작업을 한 커밋으로 묶어 중간 실패 시 어정쩡한 상태를 남기지 않는다
+        self.session.query(Post).filter(Post.category_id == category.id).update(
+            {Post.category_id: fallback_id}, synchronize_session=False
+        )
+        self.session.delete(category)
+        self.session.commit()
 
 
 class UploadRepository:

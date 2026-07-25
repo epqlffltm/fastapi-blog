@@ -97,3 +97,92 @@ def test_create_category_invalid_slug(admin_client, mock_category_repo):
         assert response.status_code == 422, bad
 
     mock_category_repo.save.assert_not_called()
+    
+# ---------- 이름 변경 ----------
+
+def test_update_category(admin_client, mock_category_repo):
+    target = _make_category(id=1, slug="dnd", name="TRPG")
+    mock_category_repo.get_category_by_id.return_value = target
+    mock_category_repo.get_category_by_name.return_value = None
+    mock_category_repo.update.return_value = target
+
+    response = admin_client.patch("/categories/1", json={"name": "테이블토크"})
+
+    assert response.status_code == 200
+    assert target.name == "테이블토크"
+    mock_category_repo.update.assert_called_once()
+
+
+def test_update_category_same_name_ok(admin_client, mock_category_repo):
+    """자기 이름 그대로 저장은 허용 (중복 검사에 자기 자신 예외)"""
+    target = _make_category(id=1, slug="dnd", name="TRPG")
+    mock_category_repo.get_category_by_id.return_value = target
+    mock_category_repo.get_category_by_name.return_value = target
+    mock_category_repo.update.return_value = target
+
+    response = admin_client.patch("/categories/1", json={"name": "TRPG"})
+
+    assert response.status_code == 200
+
+
+def test_update_category_duplicate_name(admin_client, mock_category_repo):
+    target = _make_category(id=1, slug="dnd", name="TRPG")
+    other = _make_category(id=2, slug="dev", name="개발")
+    mock_category_repo.get_category_by_id.return_value = target
+    mock_category_repo.get_category_by_name.return_value = other
+
+    response = admin_client.patch("/categories/1", json={"name": "개발"})
+
+    assert response.status_code == 409
+    mock_category_repo.update.assert_not_called()
+
+
+def test_update_category_not_found(admin_client, mock_category_repo):
+    mock_category_repo.get_category_by_id.return_value = None
+    response = admin_client.patch("/categories/999", json={"name": "뭐든"})
+    assert response.status_code == 404
+
+
+def test_update_category_without_permission(auth_client, mock_category_repo):
+    response = auth_client.patch("/categories/1", json={"name": "새이름"})
+    assert response.status_code == 403
+    mock_category_repo.update.assert_not_called()
+
+
+# ---------- 삭제 (미분류로 재배치) ----------
+
+def test_delete_category_reassigns(admin_client, mock_category_repo):
+    """분류를 지우면 글은 미분류로 옮기고 분류를 삭제한다"""
+    target = _make_category(id=1, slug="dnd", name="TRPG")
+    fallback = _make_category(id=9, slug="uncategorized", name="미분류")
+    mock_category_repo.get_category_by_id.return_value = target
+    mock_category_repo.get_category_by_slug.return_value = fallback
+
+    response = admin_client.delete("/categories/1")
+
+    assert response.status_code == 204
+    mock_category_repo.reassign_and_delete.assert_called_once_with(target, 9)
+
+
+def test_cannot_delete_uncategorized(admin_client, mock_category_repo):
+    """미분류 자체는 삭제 금지 (안전망)"""
+    target = _make_category(id=9, slug="uncategorized", name="미분류")
+    mock_category_repo.get_category_by_id.return_value = target
+
+    response = admin_client.delete("/categories/9")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "cannot delete the default category"
+    mock_category_repo.reassign_and_delete.assert_not_called()
+
+
+def test_delete_category_not_found(admin_client, mock_category_repo):
+    mock_category_repo.get_category_by_id.return_value = None
+    response = admin_client.delete("/categories/999")
+    assert response.status_code == 404
+
+
+def test_delete_category_without_permission(auth_client, mock_category_repo):
+    response = auth_client.delete("/categories/1")
+    assert response.status_code == 403
+    mock_category_repo.reassign_and_delete.assert_not_called()

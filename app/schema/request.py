@@ -13,6 +13,9 @@ nickname 제거 (작성자는 토큰에서)
 이미지는 본문(마크다운)에 들어가므로 image 필드 제거
 댓글에 parent_id 추가 (대댓글)
 분류 생성 / 권한 · 정지 · 강퇴
+
+2026-07-25
+분류 이름 변경 / 글 분류 이동
 '''
 
 from pydantic import BaseModel, EmailStr, Field
@@ -62,6 +65,16 @@ class CategoryCreate(BaseModel):
     slug: str = Field(min_length=1, max_length=32, pattern=r"^[a-z0-9-]+$")
     name: str = Field(min_length=1, max_length=32)
     display_order: int = 0
+
+
+class CategoryUpdate(BaseModel):
+    # slug 는 URL 에 박혀 있어 바꾸면 링크가 깨지므로 이름만 변경 대상
+    name: str = Field(min_length=1, max_length=32)
+
+
+class PostCategoryUpdate(BaseModel):
+    # 글을 다른 분류로 옮긴다 (관리자 전용, 미분류 청소용)
+    category_id: int
 
 
 class PermissionUpdateRequest(BaseModel):

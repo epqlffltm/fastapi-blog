@@ -17,6 +17,8 @@ repository 패턴 적용
 2026-07-25
 관리자(can_manage_post) 남의 글 수정·삭제
 삭제 글은 관리자에게만 목록·상세에 노출 (옵셔널 인증)
+삭제 복구
+글 분류 이동 (관리자, 미분류 청소)
 '''
 
 from fastapi import APIRouter, Depends, HTTPException, Body
@@ -24,7 +26,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from ..database.repository import PostRepository, CategoryRepository
 from ..database.orm import Post, User
-from ..schema.request import PostCreate
+from ..schema.request import PostCreate, PostCategoryUpdate
 from ..schema.response import (
     ListPostSchema, PostListItemSchema, PostDetailSchema,
     UserBriefSchema, CategorySchema,
@@ -174,6 +176,30 @@ def restore_post_handler(
         raise HTTPException(status_code=404, detail="post not found")
 
     post.is_deleted = False
+    post.updated_at = datetime.now(timezone.utc)
+    post = post_repo.update(post)
+
+    post.comments = visible_comments(post.comments)
+    return post
+
+
+@router.patch("/page/{id}/category", status_code=200, response_model=PostDetailSchema)#분류 이동
+def move_post_category_handler(
+    id: int,
+    request: PostCategoryUpdate,
+    current_user: User = Depends(require_permission("can_manage_post")),
+    post_repo: PostRepository = Depends(),
+    category_repo: CategoryRepository = Depends(),
+):
+    # 삭제된 글도 옮길 수 있게 include_deleted 로 찾는다
+    post = post_repo.get_post_by_id(id, include_deleted=True)
+    if post is None:
+        raise HTTPException(status_code=404, detail="post not found")
+
+    if category_repo.get_category_by_id(request.category_id) is None:
+        raise HTTPException(status_code=400, detail="category not found")
+
+    post.category_id = request.category_id
     post.updated_at = datetime.now(timezone.utc)
     post = post_repo.update(post)
 

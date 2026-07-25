@@ -1,12 +1,13 @@
 // 2026-07-24 관리 화면 (분류 추가 / 회원 권한 · 제재)
+// 2026-07-25 분류 이름변경·삭제 / 미분류 글 정리 / 글 관리 권한 체크박스
 
 const PERMISSION_LABELS = [
     ["can_comment", "댓글"],
     ["can_write_post", "글쓰기"],
     ["can_upload", "이미지 업로드"],
     ["can_manage_category", "분류 관리"],
-    ["can_manage_user", "회원 관리"],
     ["can_manage_post", "글 관리"],
+    ["can_manage_user", "회원 관리"],
 ];
 
 const adminEl = document.getElementById("admin");
@@ -17,6 +18,10 @@ const categoryForm = document.getElementById("category-form");
 const categoryError = document.getElementById("category-error");
 const categorySubmit = document.getElementById("category-submit");
 const categoryList = document.getElementById("category-list");
+
+const uncatSection = document.getElementById("uncat-section");
+const uncatError = document.getElementById("uncat-error");
+const uncatList = document.getElementById("uncat-list");
 
 const userSection = document.getElementById("user-section");
 const userError = document.getElementById("user-error");
@@ -48,6 +53,11 @@ async function init() {
         categorySection.hidden = false;
         await loadCategories();
     }
+    // 미분류 청소는 글을 옮기는 일이라 글 관리 권한이 필요하다
+    if (can(currentUser, "can_manage_post")) {
+        uncatSection.hidden = false;
+        await loadUncategorizedPosts();
+    }
     if (can(currentUser, "can_manage_user")) {
         userSection.hidden = false;
         await loadUsers();
@@ -61,21 +71,146 @@ async function loadCategories() {
     try {
         const data = await api.get("/categories");
         for (const category of data.categories) {
-            const li = document.createElement("li");
-
-            const label = document.createElement("span");
-            label.textContent = `${category.name} (${category.slug})`;
-
-            const count = document.createElement("span");
-            count.className = "count";
-            count.textContent = category.post_count;
-
-            li.append(label, count);
-            categoryList.append(li);
+            categoryList.append(createCategoryRow(category));
         }
     } catch (err) {
         categoryError.textContent = err.message;
     }
+}
+
+function createCategoryRow(category) {
+    const li = document.createElement("li");
+    li.style.display = "flex";
+    li.style.alignItems = "center";
+    li.style.gap = "8px";
+
+    const label = document.createElement("span");
+    label.style.flex = "1";
+    label.textContent = `${category.name} (${category.slug})`;
+
+    const count = document.createElement("span");
+    count.className = "count";
+    count.textContent = category.post_count;
+
+    li.append(label, count);
+
+    // 이름 변경 (미분류 포함 허용)
+    const rename = document.createElement("button");
+    rename.className = "ghost-btn";
+    rename.textContent = "이름 변경";
+    rename.addEventListener("click", async () => {
+        const name = prompt("새 이름", category.name);
+        if (name === null || !name.trim()) return;      // 취소/빈값
+        categoryError.textContent = "";
+        try {
+            await api.patch(`/categories/${category.id}`, { name: name.trim() });
+            await loadCategories();
+        } catch (err) {
+            categoryError.textContent = err.message;
+        }
+    });
+    li.append(rename);
+
+    // 미분류는 안전망이라 삭제 버튼을 두지 않는다
+    if (category.slug !== "uncategorized") {
+        const del = document.createElement("button");
+        del.className = "ghost-btn danger";
+        del.textContent = "삭제";
+        del.addEventListener("click", async () => {
+            const msg = category.post_count > 0
+                ? `"${category.name}" 을(를) 삭제하면 글 ${category.post_count}개가 미분류로 이동합니다. 계속할까요?`
+                : `"${category.name}" 을(를) 삭제할까요?`;
+            if (!confirm(msg)) return;
+            categoryError.textContent = "";
+            try {
+                await api.del(`/categories/${category.id}`);
+                await loadCategories();
+                // 미분류로 옮겨온 글을 정리 목록에 반영
+                if (!uncatSection.hidden) await loadUncategorizedPosts();
+            } catch (err) {
+                categoryError.textContent = err.message;
+            }
+        });
+        li.append(del);
+    }
+
+    return li;
+}
+
+// ---------- 미분류 글 정리 ----------
+
+async function loadUncategorizedPosts() {
+    uncatList.replaceChildren();
+    uncatError.textContent = "";
+    try {
+        // 미분류 글 + 옮길 대상 분류를 함께 가져온다
+        const [posts, cats] = await Promise.all([
+            api.get("/pages?category=uncategorized"),
+            api.get("/categories"),
+        ]);
+
+        // 옮길 대상에서 미분류 자신은 뺀다
+        const targets = cats.categories.filter((c) => c.slug !== "uncategorized");
+
+        if (posts.posts.length === 0) {
+            const empty = document.createElement("p");
+            empty.className = "meta";
+            empty.textContent = "미분류 글이 없습니다.";
+            uncatList.append(empty);
+            return;
+        }
+
+        for (const post of posts.posts) {
+            uncatList.append(createUncatRow(post, targets));
+        }
+    } catch (err) {
+        uncatError.textContent = err.message;
+    }
+}
+
+function createUncatRow(post, targets) {
+    const row = document.createElement("div");
+    row.style.display = "flex";
+    row.style.alignItems = "center";
+    row.style.gap = "12px";
+    row.style.padding = "6px 0";
+
+    const title = document.createElement("a");
+    title.href = `/post?id=${post.id}`;
+    title.textContent = post.title;
+    title.style.flex = "1";
+
+    const select = document.createElement("select");
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "분류 선택…";
+    select.append(placeholder);
+    for (const c of targets) {
+        const opt = document.createElement("option");
+        opt.value = c.id;
+        opt.textContent = c.name;
+        select.append(opt);
+    }
+
+    // 분류를 고르면 바로 옮긴다
+    select.addEventListener("change", async () => {
+        if (!select.value) return;
+        select.disabled = true;
+        uncatError.textContent = "";
+        try {
+            await api.patch(`/page/${post.id}/category`, {
+                category_id: Number(select.value),
+            });
+            row.remove();      // 옮겨졌으니 미분류 목록에서 뺀다
+        } catch (err) {
+            uncatError.textContent = err.message;
+            select.disabled = false;
+            select.value = "";
+        }
+    });
+
+    row.append(title, select);
+    return row;
 }
 
 categoryForm.addEventListener("submit", async (event) => {

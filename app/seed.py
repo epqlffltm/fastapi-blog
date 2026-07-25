@@ -12,6 +12,9 @@
 분류(사이드바) 추가
 본문을 마크다운으로 / 대댓글 예시 추가
 권한 체크박스 / dnd 밈 3개
+
+2026-07-25
+미분류(uncategorized) 분류 추가
 '''
 
 from datetime import datetime
@@ -26,6 +29,9 @@ categories_data = [
     {"slug": "dnd", "name": "TRPG", "display_order": 0},
     {"slug": "dev", "name": "개발", "display_order": 1},
     {"slug": "daily", "name": "일상", "display_order": 2},
+    # 미분류: 분류를 삭제하면 그 글들이 여기로 모인다. 항상 존재해야 하고 삭제 금지.
+    # display_order 를 크게 줘서 사이드바 맨 아래로
+    {"slug": "uncategorized", "name": "미분류", "display_order": 99},
 ]
 
 # 시드 계정 (비번은 전부 seedpass123)
@@ -192,7 +198,7 @@ def seed():
                 created.append(comment)
 
         session.commit()
-        print("시드 완료 (분류 3개 / 계정 9개, 전권 hong·gil·dong / 비번 seedpass123)")
+        print("시드 완료 (분류 4개[+미분류] / 계정 9개, 전권 hong·gil·dong / 비번 seedpass123)")
     finally:
         session.close()
 
