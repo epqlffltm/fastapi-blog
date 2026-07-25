@@ -27,13 +27,13 @@ async function init() {
         guard.textContent = err.message;
         return;
     }
-
-    // 서버도 403으로 막지만, 남의 글 수정 화면을 띄울 이유가 없다
-    if (post.user.id !== user.id) {
+    
+    // 서버도 403으로 막지만, 남의 글 수정 화면을 띄울 이유가 없다.
+    // 관리자(can_manage_post)는 남의 글도 수정할 수 있다
+    if (post.user.id !== user.id && !user.can_manage_post) {
         guard.textContent = "내 글만 수정할 수 있습니다.";
         return;
     }
-
     titleEl.value = post.title;
 
     guard.hidden = true;

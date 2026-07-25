@@ -71,6 +71,7 @@ class PermissionUpdateRequest(BaseModel):
     can_upload: bool | None = None
     can_manage_category: bool | None = None
     can_manage_user: bool | None = None
+    can_manage_post: bool | None = None
 
 
 class SuspendRequest(BaseModel):

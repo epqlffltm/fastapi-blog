@@ -1,4 +1,5 @@
 // 2026-07-24 글 상세 + 댓글 (본문은 마크다운 뷰어로 렌더, 답글은 1단계)
+// 2026-07-25 관리자(can_manage_post) 수정·삭제 노출 / 삭제됨 뱃지 / 삭제 복구
 
 const postId = new URLSearchParams(location.search).get("id");
 
@@ -56,6 +57,20 @@ function render(post) {
     document.title = `${post.title} · blog`;
     titleEl.textContent = post.title;          // 사용자 입력이므로 textContent
 
+    // 내 글이거나 관리자면 수정·삭제를 보인다 (실제 차단은 서버가 한다)
+    const canManage =
+        currentUser &&
+        (currentUser.id === post.user.id || currentUser.can_manage_post);
+    if (canManage) {
+        document.getElementById("edit-link").href = `/edit?id=${post.id}`;
+        postActions.hidden = false;
+        // 이미 삭제된 글이면 삭제 버튼은 감춘다 (복구 버튼이 대신 뜬다)
+        if (post.is_deleted) {
+            document.getElementById("delete-btn").hidden = true;
+        }
+    }
+
+    // 메타 줄을 먼저 채운다 (카테고리 · 작성자 · 날짜)
     metaEl.replaceChildren();
     const category = document.createElement("span");
     category.className = "category-tag";
@@ -64,6 +79,29 @@ function render(post) {
     rest.textContent = ` · ${post.user.nickname} · ${formatDate(post.created_at)}`;
     metaEl.append(category, rest);
 
+    // 삭제된 글이면(관리자만 여기까지 온다) 제목 옆 뱃지 + post-actions 에 복구 버튼
+    if (post.is_deleted) {
+        const badge = document.createElement("span");
+        badge.className = "deleted-badge";
+        badge.textContent = "삭제됨";
+        titleEl.append(badge);
+
+        const restore = document.createElement("button");
+        restore.className = "ghost-btn";
+        restore.textContent = "복구";
+        restore.addEventListener("click", async () => {
+            if (!confirm("이 글을 복구할까요?")) return;
+            try {
+                await api.post(`/page/${post.id}/restore`, {});
+                location.reload();      // 복구되면 삭제 표시가 사라진 상태로 다시 그린다
+            } catch (err) {
+                alert(err.message);
+            }
+        });
+        // 삭제 버튼이 있던 자리(post-actions)에 복구 버튼을 둔다
+        postActions.append(restore);
+    }
+
     // 저장된 건 마크다운 텍스트. 뷰어가 HTML 로 바꿔 그린다
     toastui.Editor.factory({
         el: viewerEl,
@@ -71,12 +109,6 @@ function render(post) {
         theme: "dark",
         initialValue: post.contents,
     });
-
-    // 내 글에만 수정·삭제를 보인다 (실제 차단은 서버가 한다)
-    if (currentUser && currentUser.id === post.user.id) {
-        document.getElementById("edit-link").href = `/edit?id=${post.id}`;
-        postActions.hidden = false;
-    }
 
     renderComments(post.comments);
 }

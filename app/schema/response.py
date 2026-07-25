@@ -60,6 +60,7 @@ class PostListItemSchema(BaseModel):
     thumbnail_url: str | None
     created_at: datetime
     comment_count: int
+    is_deleted: bool
 
 
 # 목록 전체
@@ -100,6 +101,7 @@ class PostDetailSchema(BaseModel):
     created_at: datetime
     updated_at: datetime
     comments: list[CommentSchema]
+    is_deleted: bool
 
 
 class UserSchema(BaseModel):
@@ -115,6 +117,7 @@ class UserSchema(BaseModel):
     can_upload: bool
     can_manage_category: bool
     can_manage_user: bool
+    can_manage_post: bool
 
     suspended_until: datetime | None
     is_banned: bool

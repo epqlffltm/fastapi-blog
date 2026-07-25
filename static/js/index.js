@@ -72,12 +72,19 @@ async function loadPosts() {
 
 function createPostItem(post) {
     const li = document.createElement("li");
-
+    if (post.is_deleted) li.classList.add("deleted-post");
     const h2 = document.createElement("h2");
     const link = document.createElement("a");
     link.href = `/post?id=${post.id}`;
     link.textContent = post.title;          // 사용자 입력이므로 textContent
     h2.append(link);
+
+    if (post.is_deleted) {                                    // 추가
+        const badge = document.createElement("span");
+        badge.className = "deleted-badge";
+        badge.textContent = "삭제됨";
+        h2.append(badge);
+    }
 
     const meta = document.createElement("div");
     meta.className = "meta";

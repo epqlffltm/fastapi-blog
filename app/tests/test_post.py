@@ -97,7 +97,7 @@ def test_get_pages_order_asc(client, mock_post_repo, mock_category_repo):
 
     client.get("/pages?order=asc")
 
-    mock_post_repo.get_posts.assert_called_once_with(order="asc", category_id=None)
+    mock_post_repo.get_posts.assert_called_once_with(order="asc", category_id=None, include_deleted=False)
 
 
 def test_get_pages_filtered_by_category(client, mock_post_repo, mock_category_repo):
@@ -107,7 +107,7 @@ def test_get_pages_filtered_by_category(client, mock_post_repo, mock_category_re
     response = client.get("/pages?category=dnd&order=desc")
 
     assert response.status_code == 200
-    mock_post_repo.get_posts.assert_called_once_with(order="desc", category_id=7)
+    mock_post_repo.get_posts.assert_called_once_with(order="desc", category_id=7, include_deleted=False)
 
 
 def test_get_pages_unknown_category(client, mock_post_repo, mock_category_repo):
@@ -316,5 +316,81 @@ def test_delete_post_not_found(auth_client, mock_post_repo):
     mock_post_repo.get_post_by_id.return_value = None
 
     response = auth_client.delete("/page/999")
+
+    assert response.status_code == 404
+    
+def test_admin_sees_deleted_posts_in_list(admin_viewer, mock_post_repo, mock_category_repo):
+    """관리자는 삭제된 글도 목록에서 본다"""
+    mock_post_repo.get_posts.return_value = []
+    admin_viewer.get("/pages?order=desc")
+    mock_post_repo.get_posts.assert_called_once_with(
+        order="desc", category_id=None, include_deleted=True
+    )
+
+
+def test_anonymous_does_not_see_deleted_posts(client, mock_post_repo, mock_category_repo):
+    mock_post_repo.get_posts.return_value = []
+    client.get("/pages?order=desc")
+    mock_post_repo.get_posts.assert_called_once_with(
+        order="desc", category_id=None, include_deleted=False
+    )
+
+
+def test_admin_can_open_deleted_post(admin_viewer, mock_post_repo):
+    post = _make_post(user_id=99, nickname="other")
+    post.is_deleted = True
+    mock_post_repo.get_post_by_id.return_value = post
+
+    response = admin_viewer.get("/page/1")
+
+    assert response.status_code == 200
+    assert response.json()["is_deleted"] is True
+    mock_post_repo.get_post_by_id.assert_called_once_with(1, include_deleted=True)
+
+
+def test_anonymous_cannot_open_deleted_post(client, mock_post_repo):
+    """익명에겐 삭제 글이 안 잡혀서 404"""
+    mock_post_repo.get_post_by_id.return_value = None
+    response = client.get("/page/1")
+
+    assert response.status_code == 404
+    mock_post_repo.get_post_by_id.assert_called_once_with(1, include_deleted=False)
+    
+def test_restore_post(admin_client, mock_post_repo):
+    """관리자가 삭제된 글을 되살린다"""
+    post = _make_post(user_id=99, nickname="other")
+    post.is_deleted = True
+    mock_post_repo.get_post_by_id.return_value = post
+    mock_post_repo.update.return_value = post
+
+    response = admin_client.post("/page/1/restore")
+
+    assert response.status_code == 200
+    assert post.is_deleted is False
+    # 삭제된 글을 찾아야 하므로 include_deleted=True 로 조회
+    mock_post_repo.get_post_by_id.assert_called_once_with(1, include_deleted=True)
+    mock_post_repo.update.assert_called_once()
+
+
+def test_restore_post_without_permission(auth_client, mock_post_repo):
+    """글 관리 권한이 없으면 복구 불가"""
+    response = auth_client.post("/page/1/restore")
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "permission denied: can_manage_post"
+    mock_post_repo.update.assert_not_called()
+
+
+def test_restore_post_without_token(client, mock_post_repo):
+    response = client.post("/page/1/restore")
+
+    assert response.status_code == 401
+    mock_post_repo.update.assert_not_called()
+
+
+def test_restore_post_not_found(admin_client, mock_post_repo):
+    mock_post_repo.get_post_by_id.return_value = None
+
+    response = admin_client.post("/page/999/restore")
 
     assert response.status_code == 404

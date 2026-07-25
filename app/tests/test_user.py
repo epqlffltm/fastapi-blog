@@ -32,6 +32,7 @@ def _make_user(id=1, email="test@example.com", nickname="tester"):
         suspended_until=None,
         is_banned=False,
         created_at=datetime(2026, 7, 23, tzinfo=timezone.utc),
+        can_manage_post=False,
     )
 
 

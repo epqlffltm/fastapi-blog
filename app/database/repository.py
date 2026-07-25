@@ -27,8 +27,12 @@ class PostRepository:
     def __init__(self, session: Session = Depends(get_db)):
         self.session = session
 
-    def get_posts(self, order: str, category_id: int | None = None) -> list[Post]:
-        stmt = select(Post).where(Post.is_deleted == False)
+    def get_posts(
+        self, order: str, category_id: int | None = None, include_deleted: bool = False
+    ) -> list[Post]:
+        stmt = select(Post)
+        if not include_deleted:
+            stmt = stmt.where(Post.is_deleted == False)
         if category_id is not None:
             stmt = stmt.where(Post.category_id == category_id)
         if order == "asc":
@@ -39,10 +43,11 @@ class PostRepository:
             stmt = stmt.order_by(func.random())
         return list(self.session.scalars(stmt).all())
 
-    def get_post_by_id(self, id: int) -> Post | None:
-        return self.session.scalar(
-            select(Post).where(Post.id == id).where(Post.is_deleted == False)
-        )
+    def get_post_by_id(self, id: int, include_deleted: bool = False) -> Post | None:
+        stmt = select(Post).where(Post.id == id)
+        if not include_deleted:
+            stmt = stmt.where(Post.is_deleted == False)
+        return self.session.scalar(stmt)
 
     def count_comments(self, post_id: int) -> int:
         return self.session.scalar(

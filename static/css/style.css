@@ -480,7 +480,7 @@ select:disabled {
 
 
 /* ── 에디터 · 뷰어 (Toast UI) ────────────────────────────────
-   라이브러리 자체 다크 테마를 쓰고, 테두리만 우리 선에 맞춘다.
+    라이브러리 자체 다크 테마를 쓰고, 테두리만 우리 선에 맞춘다.
    내부 구조까지 덮어쓰면 라이브러리 버전이 오를 때 깨진다 */
 
 .toastui-editor-defaultUI {
@@ -716,4 +716,19 @@ select:focus { border-color: var(--accent); }
         animation-iteration-count: 1 !important;
         transition-duration: 0.01ms !important;
     }
+}
+
+.deleted-badge {
+    margin-left: 8px;
+    padding: 1px 7px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: #f87171;
+    border: 1px solid #f87171;
+    border-radius: 999px;
+    vertical-align: middle;
+}
+
+.deleted-post {
+    opacity: 0.55;   /* 목록에서 삭제된 글은 흐리게 */
 }

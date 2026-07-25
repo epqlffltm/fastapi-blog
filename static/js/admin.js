@@ -6,6 +6,7 @@ const PERMISSION_LABELS = [
     ["can_upload", "이미지 업로드"],
     ["can_manage_category", "분류 관리"],
     ["can_manage_user", "회원 관리"],
+    ["can_manage_post", "글 관리"],
 ];
 
 const adminEl = document.getElementById("admin");

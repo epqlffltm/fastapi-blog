@@ -44,6 +44,20 @@ def get_current_user(
         raise HTTPException(status_code=401, detail="user not found")
     return user
 
+def get_current_user_optional(
+    access_token: str | None = Cookie(default=None, alias=COOKIE_NAME),
+    auth_service: AuthService = Depends(),
+    user_repo: UserRepository = Depends(),
+) -> User | None:
+    # 공개 페이지용. 토큰이 없거나 이상하면 401 대신 그냥 None (비로그인 취급)
+    if access_token is None:
+        return None
+    try:
+        user_id = auth_service.decode_jwt(access_token)
+    except jwt.PyJWTError:      # 만료(ExpiredSignatureError 포함)도 여기 잡힌다
+        return None
+    return user_repo.get_user_by_id(user_id)
+
 
 def get_verified_user(
     current_user: User = Depends(get_current_user),

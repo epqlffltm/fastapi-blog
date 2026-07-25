@@ -13,6 +13,10 @@ repository 패턴 적용
 본문 마크다운화 + 썸네일 추출
 대댓글 표시 규칙 적용
 권한 체크박스 연동
+
+2026-07-25
+관리자(can_manage_post) 남의 글 수정·삭제
+삭제 글은 관리자에게만 목록·상세에 노출 (옵셔널 인증)
 '''
 
 from fastapi import APIRouter, Depends, HTTPException, Body
@@ -27,7 +31,10 @@ from ..schema.response import (
 )
 from ..service.comment import visible_comments
 from ..service.markdown import extract_first_image
-from .dependency import get_current_user, get_active_user, require_permission
+from .dependency import (
+    get_current_user, get_active_user, require_permission,
+    get_current_user_optional,
+)
 
 router = APIRouter(tags=["post"])
 
@@ -36,6 +43,8 @@ router = APIRouter(tags=["post"])
 def get_pages_handler(
     order: str = "random",
     category: str | None = None,
+    # 비로그인도 허용. 관리자면 삭제 글까지 본다
+    viewer: User | None = Depends(get_current_user_optional),
     post_repo: PostRepository = Depends(),
     category_repo: CategoryRepository = Depends(),
 ):
@@ -46,7 +55,11 @@ def get_pages_handler(
             raise HTTPException(status_code=404, detail="category not found")
         category_id = found.id
 
-    posts = post_repo.get_posts(order=order.lower(), category_id=category_id)
+    # 관리자(글 관리 권한)만 삭제된 글도 목록에서 본다
+    include_deleted = viewer is not None and viewer.can_manage_post
+    posts = post_repo.get_posts(
+        order=order.lower(), category_id=category_id, include_deleted=include_deleted
+    )
 
     result = []
     for post in posts:
@@ -60,6 +73,7 @@ def get_pages_handler(
                 thumbnail_url=post.thumbnail_url,
                 created_at=post.created_at,
                 comment_count=comment_count,
+                is_deleted=post.is_deleted,
             )
         )
 
@@ -69,9 +83,12 @@ def get_pages_handler(
 @router.get("/page/{id}", status_code=200, response_model=PostDetailSchema)#글 읽기
 def get_page_handler(
     id: int,
+    # 관리자면 삭제된 글도 열 수 있다. 아니면 안 잡혀서 404
+    viewer: User | None = Depends(get_current_user_optional),
     post_repo: PostRepository = Depends(),
 ):
-    post = post_repo.get_post_by_id(id)
+    is_admin = viewer is not None and viewer.can_manage_post
+    post = post_repo.get_post_by_id(id, include_deleted=is_admin)
     if post is None:
         raise HTTPException(status_code=404, detail="post not found")
 
@@ -110,7 +127,8 @@ def update_post_handler(
     post = post_repo.get_post_by_id(id)
     if post is None:
         raise HTTPException(status_code=404, detail="post not found")
-    if post.user_id != current_user.id:      # 내 글만 수정 가능
+    # 관리자(can_manage_post)는 남의 글도 손댈 수 있다. 아니면 작성자 본인만
+    if post.user_id != current_user.id and not current_user.can_manage_post:
         raise HTTPException(status_code=403, detail="not your post")
 
     if title is not None:
@@ -135,10 +153,29 @@ def delete_post_handler(
     post = post_repo.get_post_by_id(id)
     if post is None:
         raise HTTPException(status_code=404, detail="post not found")
-    if post.user_id != current_user.id:      # 내 글만 삭제 가능
+    # 관리자(can_manage_post)는 남의 글도 손댈 수 있다. 아니면 작성자 본인만
+    if post.user_id != current_user.id and not current_user.can_manage_post:
         raise HTTPException(status_code=403, detail="not your post")
 
     post.is_deleted = True
     post.updated_at = datetime.now(timezone.utc)
     post_repo.update(post)
     return
+
+@router.post("/page/{id}/restore", status_code=200, response_model=PostDetailSchema)#삭제 복구
+def restore_post_handler(
+    id: int,
+    current_user: User = Depends(require_permission("can_manage_post")),
+    post_repo: PostRepository = Depends(),
+):
+    # 삭제된 글이 대상이므로 include_deleted 로 찾는다
+    post = post_repo.get_post_by_id(id, include_deleted=True)
+    if post is None:
+        raise HTTPException(status_code=404, detail="post not found")
+
+    post.is_deleted = False
+    post.updated_at = datetime.now(timezone.utc)
+    post = post_repo.update(post)
+
+    post.comments = visible_comments(post.comments)
+    return post

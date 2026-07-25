@@ -33,11 +33,11 @@ PERMISSIONS: tuple[tuple[str, str], ...] = (
     ("can_write_post", "글쓰기"),
     ("can_upload", "이미지 업로드"),
     ("can_manage_category", "분류 관리"),
+    ("can_manage_post", "글 관리"),
     ("can_manage_user", "회원 관리"),
 )
 
 PERMISSION_NAMES: tuple[str, ...] = tuple(name for name, _ in PERMISSIONS)
-
 
 class Post(Base):
     __tablename__ = "posts"
@@ -154,6 +154,7 @@ class User(Base):    # 회원 테이블
     can_upload: Mapped[bool] = mapped_column(default=False)
     can_manage_category: Mapped[bool] = mapped_column(default=False)
     can_manage_user: Mapped[bool] = mapped_column(default=False)
+    can_manage_post: Mapped[bool] = mapped_column(default=False)
 
     # 제재 — 정지는 기한이 지나면 저절로 풀리고, 강퇴는 사람이 풀어야 한다
     suspended_until: Mapped[datetime | None] = mapped_column(default=None)
@@ -200,6 +201,7 @@ class User(Base):    # 회원 테이블
             can_write_post=False,
             can_upload=False,
             can_manage_category=False,
+            can_manage_post=False,
             can_manage_user=False,
             suspended_until=None,
             is_banned=False,

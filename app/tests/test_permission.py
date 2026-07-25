@@ -17,6 +17,7 @@ def _make_user(id=2, nickname="other", **kwargs):
         can_manage_category=False, can_manage_user=False,
         suspended_until=None, is_banned=False,
         created_at=datetime(2026, 7, 23, tzinfo=timezone.utc),
+        can_manage_post=False,
     )
     defaults.update(kwargs)
     return User(id=id, **defaults)
