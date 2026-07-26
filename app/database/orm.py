@@ -17,9 +17,12 @@ nickname → user_id FK 전환
 images → uploads (업로드 파일 기록) 전환, 본문 썸네일
 대댓글 (parent_id 자기참조 FK, 1단계)
 role → 권한 체크박스 / 정지 · 강퇴
+
+2026-07-26
+조회수 컬럼 / 좋아요(likes) 테이블
 '''
 
-from sqlalchemy import ForeignKey, String
+from sqlalchemy import ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime, timezone
 from .connection import Base    # connection의 Base 재사용 (새로 만들지 않음)
@@ -230,4 +233,31 @@ class Category(Base):    # 글 분류 (사이드바)
             slug=request.slug,
             name=request.name,
             display_order=request.display_order,
+        )
+
+
+
+class Like(Base):    # 글 좋아요
+    __tablename__ = "likes"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    post_id: Mapped[int] = mapped_column(ForeignKey("posts.id"), index=True)
+    created_at: Mapped[datetime]
+
+    # (user_id, post_id) 조합을 유일하게 — 한 사람이 같은 글에 두 번 좋아요 못 누른다.
+    # 중복 방지를 앱 로직이 아니라 DB 제약으로 보장한다
+    __table_args__ = (
+        UniqueConstraint("user_id", "post_id", name="uq_likes_user_post"),
+    )
+
+    def __repr__(self):
+        return f"Like(user_id={self.user_id}, post_id={self.post_id})"
+
+    @classmethod
+    def create(cls, user_id: int, post_id: int) -> "Like":
+        return cls(
+            user_id=user_id,
+            post_id=post_id,
+            created_at=datetime.now(timezone.utc),
         )

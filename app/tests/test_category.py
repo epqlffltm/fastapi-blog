@@ -186,3 +186,30 @@ def test_delete_category_without_permission(auth_client, mock_category_repo):
     response = auth_client.delete("/categories/1")
     assert response.status_code == 403
     mock_category_repo.reassign_and_delete.assert_not_called()
+    
+    
+def test_categories_hide_uncategorized_for_anonymous(client, mock_category_repo):
+    """비로그인/일반 유저에겐 미분류가 목록에서 빠진다"""
+    mock_category_repo.get_categories_with_counts.return_value = [
+        (_make_category(1, "dnd", "TRPG", 0), 3),
+        (_make_category(9, "uncategorized", "미분류", 99), 0),
+    ]
+
+    response = client.get("/categories")
+
+    slugs = [c["slug"] for c in response.json()["categories"]]
+    assert "uncategorized" not in slugs
+    assert "dnd" in slugs
+
+
+def test_categories_show_uncategorized_for_admin(admin_viewer, mock_category_repo):
+    """분류 관리 권한이 있으면 미분류도 보인다"""
+    mock_category_repo.get_categories_with_counts.return_value = [
+        (_make_category(1, "dnd", "TRPG", 0), 3),
+        (_make_category(9, "uncategorized", "미분류", 99), 0),
+    ]
+
+    response = admin_viewer.get("/categories")
+
+    slugs = [c["slug"] for c in response.json()["categories"]]
+    assert "uncategorized" in slugs

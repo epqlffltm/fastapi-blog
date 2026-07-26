@@ -58,7 +58,8 @@ def _make_post(id=1, title="테스트 글", contents="본문", user_id=1, nickna
 def test_get_pages(client, mock_post_repo, mock_category_repo):
     mock_post_repo.get_posts.return_value = [_make_post(thumbnail_url="/img/a.png")]
     mock_post_repo.count_comments.return_value = 2
-
+    mock_like_repo.count_for_post.return_value = 5
+    
     response = client.get("/pages")
 
     assert response.status_code == 200
@@ -75,6 +76,7 @@ def test_get_pages_without_thumbnail(client, mock_post_repo, mock_category_repo)
     """이미지 없는 글은 썸네일이 null"""
     mock_post_repo.get_posts.return_value = [_make_post()]
     mock_post_repo.count_comments.return_value = 0
+    mock_like_repo.count_for_post.return_value = 0
 
     response = client.get("/pages")
 
@@ -436,3 +438,88 @@ def test_view_count_skipped_for_deleted_post(admin_viewer, mock_post_repo):
 
     assert response.status_code == 200
     mock_post_repo.increment_view_count.assert_not_called()
+    
+# ---------- 좋아요 ----------
+
+def test_like_first_time(auth_client, mock_post_repo, mock_like_repo):
+    """처음 누르면 좋아요 (add 호출, liked=True)"""
+    mock_post_repo.get_post_by_id.return_value = _make_post()
+    mock_like_repo.exists.return_value = False        # 아직 안 누름
+    mock_like_repo.count_for_post.return_value = 1
+
+    response = auth_client.post("/page/1/like")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["liked"] is True
+    assert body["like_count"] == 1
+    mock_like_repo.add.assert_called_once()
+    mock_like_repo.remove.assert_not_called()
+
+
+def test_like_toggle_off(auth_client, mock_post_repo, mock_like_repo):
+    """이미 눌렀으면 한 번 더 = 취소 (remove 호출, liked=False)"""
+    mock_post_repo.get_post_by_id.return_value = _make_post()
+    mock_like_repo.exists.return_value = True          # 이미 누름
+    mock_like_repo.count_for_post.return_value = 0
+
+    response = auth_client.post("/page/1/like")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["liked"] is False
+    assert body["like_count"] == 0
+    mock_like_repo.remove.assert_called_once()
+    mock_like_repo.add.assert_not_called()
+
+
+def test_like_requires_login(client, mock_post_repo, mock_like_repo):
+    """비로그인은 좋아요 못 누른다"""
+    response = client.post("/page/1/like")
+
+    assert response.status_code == 401
+    mock_like_repo.add.assert_not_called()
+
+
+def test_like_blocked_when_banned(banned_client, mock_post_repo, mock_like_repo):
+    """제재(강퇴) 중엔 좋아요 못 누른다"""
+    response = banned_client.post("/page/1/like")
+
+    assert response.status_code == 403
+    mock_like_repo.add.assert_not_called()
+
+
+def test_like_post_not_found(auth_client, mock_post_repo, mock_like_repo):
+    mock_post_repo.get_post_by_id.return_value = None
+
+    response = auth_client.post("/page/999/like")
+
+    assert response.status_code == 404
+    mock_like_repo.add.assert_not_called()
+
+
+def test_get_like_status_anonymous(client, mock_post_repo, mock_like_repo):
+    """비로그인은 liked=False, 좋아요 수는 보인다"""
+    mock_post_repo.get_post_by_id.return_value = _make_post()
+    mock_like_repo.count_for_post.return_value = 3
+
+    response = client.get("/page/1/like")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["liked"] is False
+    assert body["like_count"] == 3
+
+
+def test_get_like_status_when_liked(admin_viewer, mock_post_repo, mock_like_repo):
+    """내가 누른 글이면 liked=True (옵셔널 인증이라 admin_viewer 사용)"""
+    mock_post_repo.get_post_by_id.return_value = _make_post()
+    mock_like_repo.exists.return_value = True
+    mock_like_repo.count_for_post.return_value = 5
+
+    response = admin_viewer.get("/page/1/like")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["liked"] is True
+    assert body["like_count"] == 5

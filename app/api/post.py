@@ -22,17 +22,18 @@ repository 패턴 적용
 
 2026-07-26
 조회수 (IP별 Redis 중복 방지, 삭제 글 제외)
+좋아요 토글 (likes 테이블, 매번 COUNT)
 '''
 
 from fastapi import APIRouter, Depends, HTTPException, Body, Request
 from datetime import datetime, timezone
 from typing import Optional
-from ..database.repository import PostRepository, CategoryRepository
+from ..database.repository import PostRepository, CategoryRepository, LikeRepository
 from ..database.orm import Post, User
 from ..schema.request import PostCreate, PostCategoryUpdate
 from ..schema.response import (
     ListPostSchema, PostListItemSchema, PostDetailSchema,
-    UserBriefSchema, CategorySchema,
+    UserBriefSchema, CategorySchema, LikeResultSchema,
 )
 from ..service.comment import visible_comments
 from ..service.markdown import extract_first_image
@@ -57,6 +58,7 @@ def get_pages_handler(
     viewer: User | None = Depends(get_current_user_optional),
     post_repo: PostRepository = Depends(),
     category_repo: CategoryRepository = Depends(),
+    like_repo: LikeRepository = Depends(),
 ):
     category_id = None
     if category is not None:
@@ -84,6 +86,8 @@ def get_pages_handler(
                 created_at=post.created_at,
                 comment_count=comment_count,
                 is_deleted=post.is_deleted,
+                view_count=post.view_count,
+                like_count=like_repo.count_for_post(post.id),
             )
         )
 
@@ -225,3 +229,40 @@ def move_post_category_handler(
 
     post.comments = visible_comments(post.comments)
     return post
+
+
+@router.get("/page/{id}/like", status_code=200, response_model=LikeResultSchema)#좋아요 상태
+def get_like_handler(
+    id: int,
+    viewer: User | None = Depends(get_current_user_optional),
+    post_repo: PostRepository = Depends(),
+    like_repo: LikeRepository = Depends(),
+):
+    if post_repo.get_post_by_id(id) is None:
+        raise HTTPException(status_code=404, detail="post not found")
+
+    # 비로그인은 누른 적이 없으니 liked=False
+    liked = viewer is not None and like_repo.exists(viewer.id, id)
+    return LikeResultSchema(like_count=like_repo.count_for_post(id), liked=liked)
+
+
+@router.post("/page/{id}/like", status_code=200, response_model=LikeResultSchema)#좋아요 토글
+def toggle_like_handler(
+    id: int,
+    current_user: User = Depends(get_active_user),
+    post_repo: PostRepository = Depends(),
+    like_repo: LikeRepository = Depends(),
+):
+    # 삭제된 글은 get_post_by_id 가 안 잡아서 404 (삭제 글엔 좋아요 못 누른다)
+    if post_repo.get_post_by_id(id) is None:
+        raise HTTPException(status_code=404, detail="post not found")
+
+    # 이미 눌렀으면 취소, 아니면 좋아요 (버튼 한 번 더 = 취소)
+    if like_repo.exists(current_user.id, id):
+        like_repo.remove(current_user.id, id)
+        liked = False
+    else:
+        like_repo.add(current_user.id, id)
+        liked = True
+
+    return LikeResultSchema(like_count=like_repo.count_for_post(id), liked=liked)

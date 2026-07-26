@@ -6,6 +6,9 @@
 
 2026-07-25
 이름 변경 / 삭제(미분류로 재배치 후 삭제)
+
+2026-07-26
+미분류는 분류 관리 권한자에게만 목록에 노출
 '''
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -13,16 +16,24 @@ from ..database.orm import Category, User
 from ..database.repository import CategoryRepository
 from ..schema.request import CategoryCreate, CategoryUpdate
 from ..schema.response import CategoryListItemSchema, CategorySchema, ListCategorySchema
-from .dependency import require_permission
+from .dependency import require_permission, get_current_user_optional
 
 router = APIRouter(tags=["category"])
+
+# 미분류: 분류 삭제 시 글이 모이는 안전망. 이 분류 자체는 삭제할 수 없고,
+# 사이드바에는 분류 관리 권한자에게만 보인다
+UNCATEGORIZED_SLUG = "uncategorized"
 
 
 @router.get("/categories", status_code=200, response_model=ListCategorySchema)#분류 목록
 def get_categories_handler(
+    viewer: User | None = Depends(get_current_user_optional),
     category_repo: CategoryRepository = Depends(),
 ):
     rows = category_repo.get_categories_with_counts()
+
+    # 미분류는 관리 화면 청소용이라, 분류 관리 권한이 있는 사람에게만 사이드바에 보인다
+    can_see_uncategorized = viewer is not None and viewer.can_manage_category
 
     return ListCategorySchema(
         categories=[
@@ -33,6 +44,7 @@ def get_categories_handler(
                 post_count=count,
             )
             for category, count in rows
+            if can_see_uncategorized or category.slug != UNCATEGORIZED_SLUG
         ]
     )
 
@@ -49,10 +61,6 @@ def create_category_handler(
         raise HTTPException(status_code=409, detail="name already exists")
 
     return category_repo.save(Category.create(request))
-
-
-# 미분류: 분류 삭제 시 글이 모이는 안전망. 이 분류 자체는 삭제할 수 없다
-UNCATEGORIZED_SLUG = "uncategorized"
 
 
 @router.patch("/categories/{id}", status_code=200, response_model=CategorySchema)#분류 이름 변경

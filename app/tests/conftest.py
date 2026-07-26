@@ -20,7 +20,7 @@ from unittest.mock import AsyncMock, Mock
 from redis import Redis
 from app.main import app
 from app.database.orm import User
-from app.database.repository import PostRepository, CommentRepository, UserRepository,CategoryRepository, UploadRepository
+from app.database.repository import PostRepository, CommentRepository, UserRepository, CategoryRepository, UploadRepository, LikeRepository
 from app.database.cache import get_redis_client
 from app.api.dependency import get_current_user
 from app.service.email import EmailService
@@ -110,6 +110,14 @@ def mock_post_repo():
 
 
 @pytest.fixture
+def mock_like_repo():
+    repo = Mock(spec=LikeRepository)
+    app.dependency_overrides[LikeRepository] = lambda: repo
+    yield repo
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
 def mock_comment_repo():
     repo = Mock(spec=CommentRepository)
     app.dependency_overrides[CommentRepository] = lambda: repo
@@ -163,14 +171,6 @@ def mock_email_service():
     service = Mock(spec=EmailService)
     app.dependency_overrides[EmailService] = lambda: service
     yield service
-    app.dependency_overrides.clear()
-    
-@pytest.fixture
-def admin_viewer(client, current_user):
-    """공개 조회를 관리자 눈으로 본다 (옵셔널 인증 override)"""
-    current_user.grant_all()      # can_manage_post 포함
-    app.dependency_overrides[get_current_user_optional] = lambda: current_user
-    yield client
     app.dependency_overrides.clear()
     
 @pytest.fixture

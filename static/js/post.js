@@ -1,6 +1,6 @@
 // 2026-07-24 글 상세 + 댓글 (본문은 마크다운 뷰어로 렌더, 답글은 1단계)
 // 2026-07-25 관리자(can_manage_post) 수정·삭제 노출 / 삭제됨 뱃지 / 삭제 복구
-// 2026-07-26 조회수 표시
+// 2026-07-26 조회수 표시 / 좋아요 버튼
 
 const postId = new URLSearchParams(location.search).get("id");
 
@@ -10,6 +10,10 @@ const titleEl = document.getElementById("title");
 const metaEl = document.getElementById("meta");
 const viewerEl = document.getElementById("viewer");
 const postActions = document.getElementById("post-actions");
+
+const likeBtn = document.getElementById("like-btn");
+const likeIcon = document.getElementById("like-icon");
+const likeCount = document.getElementById("like-count");
 
 const commentCountEl = document.getElementById("comment-count");
 const commentList = document.getElementById("comment-list");
@@ -112,10 +116,48 @@ function render(post) {
         initialValue: post.contents,
     });
 
+    // 좋아요 바 — 삭제된 글엔 안 보인다 (좋아요 대상이 아님)
+    if (!post.is_deleted) {
+        setupLikeBar(post.id);
+    }
+
     renderComments(post.comments);
 }
 
 // 서버는 시간순 한 줄로 보낸다. 부모 아래 답글이 오도록 여기서 묶는다
+// ---------- 좋아요 ----------
+
+async function setupLikeBar(postId) {
+    likeBtn.hidden = false;
+
+    // 초기 상태(좋아요 수 + 내가 눌렀는지)를 불러온다
+    try {
+        renderLike(await api.get(`/page/${postId}/like`));
+    } catch (err) {
+        // 상태 조회 실패해도 버튼은 0으로 남겨둔다
+    }
+
+    likeBtn.addEventListener("click", async () => {
+        if (!currentUser) {
+            alert("로그인이 필요합니다.");
+            return;
+        }
+        try {
+            renderLike(await api.post(`/page/${postId}/like`, {}));
+        } catch (err) {
+            alert(err.message);
+        }
+    });
+}
+
+function renderLike(status) {
+    // liked 면 채워진 하트, 아니면 빈 하트
+    likeIcon.textContent = status.liked ? "♥" : "♡";
+    likeCount.textContent = status.like_count;
+    likeBtn.classList.toggle("liked", status.liked);
+}
+
+
 function renderComments(comments) {
     const alive = comments.filter((c) => !c.is_deleted).length;
     commentCountEl.textContent = `댓글 ${alive}`;

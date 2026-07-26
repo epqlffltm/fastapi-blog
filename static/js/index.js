@@ -95,7 +95,8 @@ function createPostItem(post) {
 
     const rest = document.createElement("span");
     rest.textContent =
-        ` · ${post.user.nickname} · ${formatDate(post.created_at)} · 댓글 ${post.comment_count}`;
+        ` · ${post.user.nickname} · ${formatDate(post.created_at)}` +
+        ` · 조회 ${post.view_count} · 좋아요 ${post.like_count} · 댓글 ${post.comment_count}`;
 
     meta.append(category, rest);
     li.append(h2, meta);

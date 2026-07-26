@@ -20,13 +20,16 @@ UploadRepository 추가 (save_with_images 제거)
 
 2026-07-26
 조회수 원자적 증가
+
+2026-07-26
+LikeRepository (좋아요 추가/삭제/카운트/존재확인)
 '''
 
 from fastapi import Depends
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 from .connection import get_db
-from .orm import Post, Comment, Upload, User, Category
+from .orm import Post, Comment, Upload, User, Category, Like
 
 
 class PostRepository:
@@ -198,3 +201,33 @@ class UploadRepository:
         self.session.commit()
         self.session.refresh(upload)
         return upload
+
+
+
+class LikeRepository:
+    def __init__(self, session: Session = Depends(get_db)):
+        self.session = session
+
+    def count_for_post(self, post_id: int) -> int:
+        # 좋아요 수는 캐싱하지 않고 매번 센다 (이 규모에선 정확·단순이 이득)
+        return self.session.scalar(
+            select(func.count(Like.id)).where(Like.post_id == post_id)
+        )
+
+    def exists(self, user_id: int, post_id: int) -> bool:
+        row = self.session.scalar(
+            select(Like.id).where(
+                Like.user_id == user_id, Like.post_id == post_id
+            )
+        )
+        return row is not None
+
+    def add(self, user_id: int, post_id: int) -> None:
+        self.session.add(Like.create(user_id=user_id, post_id=post_id))
+        self.session.commit()
+
+    def remove(self, user_id: int, post_id: int) -> None:
+        self.session.query(Like).filter(
+            Like.user_id == user_id, Like.post_id == post_id
+        ).delete(synchronize_session=False)
+        self.session.commit()

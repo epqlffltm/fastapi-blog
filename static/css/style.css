@@ -732,3 +732,38 @@ select:focus { border-color: var(--accent); }
 .deleted-post {
     opacity: 0.55;   /* 목록에서 삭제된 글은 흐리게 */
 }
+
+/* 좋아요 버튼 */
+.like-bar {
+    margin: 24px 0;
+    display: flex;
+    justify-content: center;
+}
+
+.like-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 20px;
+    font-size: 1rem;
+    color: inherit;
+    background: transparent;
+    border: 1px solid #444;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+}
+
+.like-btn:hover {
+    border-color: #f87171;
+}
+
+.like-btn.liked {
+    color: #f87171;
+    border-color: #f87171;
+}
+
+.like-icon {
+    font-size: 1.2rem;
+    line-height: 1;
+}

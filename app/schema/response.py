@@ -61,6 +61,8 @@ class PostListItemSchema(BaseModel):
     created_at: datetime
     comment_count: int
     is_deleted: bool
+    view_count: int
+    like_count: int
 
 
 # 목록 전체
@@ -103,6 +105,12 @@ class PostDetailSchema(BaseModel):
     comments: list[CommentSchema]
     is_deleted: bool
     view_count: int
+
+
+# 좋아요 토글 / 상태 조회 응답
+class LikeResultSchema(BaseModel):
+    like_count: int
+    liked: bool          # 지금 보는 사람이 눌렀는지
 
 
 class UserSchema(BaseModel):
