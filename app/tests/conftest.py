@@ -172,3 +172,11 @@ def admin_viewer(client, current_user):
     app.dependency_overrides[get_current_user_optional] = lambda: current_user
     yield client
     app.dependency_overrides.clear()
+    
+@pytest.fixture
+def admin_viewer(client, current_user):
+    """공개 조회(get_current_user_optional)를 관리자 눈으로 본다"""
+    current_user.grant_all()      # can_manage_post 포함
+    app.dependency_overrides[get_current_user_optional] = lambda: current_user
+    yield client
+    app.dependency_overrides.pop(get_current_user_optional, None)

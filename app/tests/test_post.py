@@ -31,8 +31,7 @@ def _make_category(id=1, slug="dnd", name="TRPG"):
     return Category(id=id, slug=slug, name=name, display_order=0)
 
 
-def _make_post(id=1, title="테스트 글", contents="본문", user_id=1,
-               nickname="tester", thumbnail_url=None):
+def _make_post(id=1, title="테스트 글", contents="본문", user_id=1, nickname="tester", thumbnail_url=None):
     """테스트용 Post 객체 생성 헬퍼"""
     now = datetime(2026, 7, 21, tzinfo=timezone.utc)
     post = Post(
@@ -45,6 +44,7 @@ def _make_post(id=1, title="테스트 글", contents="본문", user_id=1,
         created_at=now,
         updated_at=now,
         is_deleted=False,
+        view_count=0,
     )
     # mock 으로 만든 객체는 DB를 거치지 않으므로 관계를 직접 채운다
     post.user = _make_user(id=user_id, nickname=nickname)
@@ -121,8 +121,11 @@ def test_get_pages_unknown_category(client, mock_post_repo, mock_category_repo):
 
 # ---------- 단일 조회 ----------
 
-def test_get_page(client, mock_post_repo):
+def test_get_page(client, mock_post_repo, mock_redis):
+    post = _make_post()
     mock_post_repo.get_post_by_id.return_value = _make_post()
+    mock_redis.set.return_value = True
+    mock_post_repo.increment_view_count.return_value = 1
 
     response = client.get("/page/1")
 
@@ -394,3 +397,42 @@ def test_restore_post_not_found(admin_client, mock_post_repo):
     response = admin_client.post("/page/999/restore")
 
     assert response.status_code == 404
+    
+# ---------- 조회수 ----------
+
+def test_view_count_increments_on_first_view(client, mock_post_repo, mock_redis):
+    """처음 보는 IP면 조회수 +1"""
+    post = _make_post(user_id=1)
+    mock_post_repo.get_post_by_id.return_value = post
+    mock_redis.set.return_value = True                    # Redis에 키 없음 = 첫 조회
+    mock_post_repo.increment_view_count.return_value = 6
+
+    response = client.get("/page/1")
+
+    assert response.status_code == 200
+    assert response.json()["view_count"] == 6
+    mock_post_repo.increment_view_count.assert_called_once_with(1)
+
+
+def test_view_count_dedup_same_ip(client, mock_post_repo, mock_redis):
+    """이미 본 IP면 조회수를 올리지 않는다"""
+    post = _make_post(user_id=1)
+    mock_post_repo.get_post_by_id.return_value = post
+    mock_redis.set.return_value = None                    # 키가 이미 있음 = 재조회
+
+    response = client.get("/page/1")
+
+    assert response.status_code == 200
+    mock_post_repo.increment_view_count.assert_not_called()
+
+
+def test_view_count_skipped_for_deleted_post(admin_viewer, mock_post_repo):
+    """삭제된 글(관리자만 봄)은 조회수를 세지 않는다"""
+    post = _make_post(user_id=99, nickname="other")
+    post.is_deleted = True
+    mock_post_repo.get_post_by_id.return_value = post
+
+    response = admin_viewer.get("/page/1")
+
+    assert response.status_code == 200
+    mock_post_repo.increment_view_count.assert_not_called()

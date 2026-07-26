@@ -102,6 +102,7 @@ class PostDetailSchema(BaseModel):
     updated_at: datetime
     comments: list[CommentSchema]
     is_deleted: bool
+    view_count: int
 
 
 class UserSchema(BaseModel):

@@ -35,6 +35,7 @@ def _make_post(id=1, user_id=1):
     post = Post(
         id=id, title="글", contents="본문", user_id=user_id, category_id=1,
         thumbnail_url=None, created_at=BASE, updated_at=BASE, is_deleted=False,
+        view_count=0,
     )
     post.user = _make_user(id=user_id)
     post.category = Category(id=1, slug="dnd", name="TRPG", display_order=0)

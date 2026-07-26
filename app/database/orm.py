@@ -51,6 +51,7 @@ class Post(Base):
     contents: Mapped[str]                              # 마크다운 원문
     thumbnail_url: Mapped[str | None] = mapped_column(String(512), default=None)
     is_deleted: Mapped[bool] = mapped_column(default=False)
+    view_count: Mapped[int] = mapped_column(default=0)   # 글 조회수
 
     # N:1 이라 joined 로딩이 적합 (글 하나당 작성자·분류 하나)
     user: Mapped["User"] = relationship(back_populates="posts", lazy="joined")
@@ -146,6 +147,7 @@ class User(Base):    # 회원 테이블
     nickname: Mapped[str] = mapped_column(String(64), unique=True)
     is_verified: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime]
+    bio: Mapped[str | None] = mapped_column(String(500), default=None)   # 자기소개
 
     # 권한 — 등급 하나가 아니라 기능별로 켜고 끈다.
     # 새 기능이 생기면 컬럼 하나만 늘리면 되고, 등급표를 다시 짤 필요가 없다

@@ -1,5 +1,6 @@
 // 2026-07-24 글 상세 + 댓글 (본문은 마크다운 뷰어로 렌더, 답글은 1단계)
 // 2026-07-25 관리자(can_manage_post) 수정·삭제 노출 / 삭제됨 뱃지 / 삭제 복구
+// 2026-07-26 조회수 표시
 
 const postId = new URLSearchParams(location.search).get("id");
 
@@ -76,7 +77,8 @@ function render(post) {
     category.className = "category-tag";
     category.textContent = post.category.name;
     const rest = document.createElement("span");
-    rest.textContent = ` · ${post.user.nickname} · ${formatDate(post.created_at)}`;
+    rest.textContent =
+        ` · ${post.user.nickname} · ${formatDate(post.created_at)} · 조회 ${post.view_count}`;
     metaEl.append(category, rest);
 
     // 삭제된 글이면(관리자만 여기까지 온다) 제목 옆 뱃지 + post-actions 에 복구 버튼

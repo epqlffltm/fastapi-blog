@@ -19,9 +19,12 @@ repository 패턴 적용
 삭제 글은 관리자에게만 목록·상세에 노출 (옵셔널 인증)
 삭제 복구
 글 분류 이동 (관리자, 미분류 청소)
+
+2026-07-26
+조회수 (IP별 Redis 중복 방지, 삭제 글 제외)
 '''
 
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, Depends, HTTPException, Body, Request
 from datetime import datetime, timezone
 from typing import Optional
 from ..database.repository import PostRepository, CategoryRepository
@@ -37,8 +40,13 @@ from .dependency import (
     get_current_user, get_active_user, require_permission,
     get_current_user_optional,
 )
+from ..database.cache import get_redis_client
+from redis import Redis
 
 router = APIRouter(tags=["post"])
+
+# 같은 IP 의 재조회를 이 시간 동안은 세지 않는다 (새로고침 뻥튀기 방지)
+VIEW_DEDUP_TTL_SECONDS = 60 * 60 * 6   # 6시간
 
 
 @router.get("/pages", status_code=200, response_model=ListPostSchema)#글 목록 보기
@@ -85,14 +93,26 @@ def get_pages_handler(
 @router.get("/page/{id}", status_code=200, response_model=PostDetailSchema)#글 읽기
 def get_page_handler(
     id: int,
+    request: Request,
     # 관리자면 삭제된 글도 열 수 있다. 아니면 안 잡혀서 404
     viewer: User | None = Depends(get_current_user_optional),
     post_repo: PostRepository = Depends(),
+    redis: Redis = Depends(get_redis_client),
 ):
     is_admin = viewer is not None and viewer.can_manage_post
     post = post_repo.get_post_by_id(id, include_deleted=is_admin)
     if post is None:
         raise HTTPException(status_code=404, detail="post not found")
+
+    # 조회수: 삭제된 글(관리자만 봄)은 세지 않는다.
+    # IP 마다 Redis 키를 두어, 없을 때만(=처음 볼 때만) +1 한다 — 새로고침 뻥튀기 방지
+    if not post.is_deleted:
+        ip = request.client.host if request.client else "unknown"
+        first_view = redis.set(
+            f"viewed:{post.id}:{ip}", "1", nx=True, ex=VIEW_DEDUP_TTL_SECONDS
+        )
+        if first_view:
+            post.view_count = post_repo.increment_view_count(post.id)
 
     # relationship 은 삭제 여부를 안 가리므로 표시 규칙을 직접 적용한다
     post.comments = visible_comments(post.comments)

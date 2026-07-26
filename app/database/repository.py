@@ -17,6 +17,9 @@ UploadRepository 추가 (save_with_images 제거)
 
 2026-07-25
 분류 이름 변경 / 삭제(미분류로 재배치 후 삭제) / 글 수 카운트
+
+2026-07-26
+조회수 원자적 증가
 '''
 
 from fastapi import Depends
@@ -70,6 +73,15 @@ class PostRepository:
         self.session.commit()
         self.session.refresh(post)
         return post
+
+    def increment_view_count(self, post_id: int) -> int:
+        # DB 레벨에서 원자적으로 +1 (읽고-더하고-쓰기 사이의 경합을 피한다).
+        # 갱신 후의 값을 다시 읽어 응답에 쓴다
+        self.session.query(Post).filter(Post.id == post_id).update(
+            {Post.view_count: Post.view_count + 1}, synchronize_session=False
+        )
+        self.session.commit()
+        return self.session.scalar(select(Post.view_count).where(Post.id == post_id))
 
 
 class CommentRepository:
