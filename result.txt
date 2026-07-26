@@ -18,9 +18,9 @@ app\tests\test_user.py ...................                               [100%]
 ================================== FAILURES ===================================
 _______________________________ test_get_pages ________________________________
 
-client = <starlette.testclient.TestClient object at 0x000002227F767690>
-mock_post_repo = <Mock spec='PostRepository' id='2347189221232'>
-mock_category_repo = <Mock spec='CategoryRepository' id='2347189215856'>
+client = <starlette.testclient.TestClient object at 0x00000176ED1749F0>
+mock_post_repo = <Mock spec='PostRepository' id='1610293481152'>
+mock_category_repo = <Mock spec='CategoryRepository' id='1610293479472'>
 
     def test_get_pages(client, mock_post_repo, mock_category_repo):
         mock_post_repo.get_posts.return_value = [_make_post(thumbnail_url="/img/a.png")]
@@ -32,9 +32,9 @@ E       NameError: name 'mock_like_repo' is not defined
 app\tests\test_post.py:61: NameError
 ______________________ test_get_pages_without_thumbnail _______________________
 
-client = <starlette.testclient.TestClient object at 0x000002227F817A10>
-mock_post_repo = <Mock spec='PostRepository' id='2347189220896'>
-mock_category_repo = <Mock spec='CategoryRepository' id='2347189210816'>
+client = <starlette.testclient.TestClient object at 0x00000176ED0EC9F0>
+mock_post_repo = <Mock spec='PostRepository' id='1610293488208'>
+mock_category_repo = <Mock spec='CategoryRepository' id='1610293485520'>
 
     def test_get_pages_without_thumbnail(client, mock_post_repo, mock_category_repo):
         """이미지 없는 글은 썸네일이 null"""
@@ -54,4 +54,4 @@ app\tests\test_post.py:79: NameError
 =========================== short test summary info ===========================
 FAILED app/tests/test_post.py::test_get_pages - NameError: name 'mock_like_re...
 FAILED app/tests/test_post.py::test_get_pages_without_thumbnail - NameError: ...
-================== 2 failed, 161 passed, 1 warning in 8.17s ===================
+================== 2 failed, 161 passed, 1 warning in 6.74s ===================

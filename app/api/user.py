@@ -19,6 +19,7 @@ from ..schema.request import (
     SignUpRequest, LogInRequest, VerifyOTPRequest,
     ResetPasswordRequest, ResetPasswordVerifyRequest,
     PermissionUpdateRequest, SuspendRequest, BanRequest,
+    ProfileUpdateRequest, PasswordChangeRequest,
 )
 from ..schema.response import ListUserSchema, UserSchema
 from ..service.auth import AuthService
@@ -98,6 +99,42 @@ def get_me_handler(
     current_user: User = Depends(get_current_user),
 ):
     return current_user
+
+
+@router.patch("/me", status_code=200, response_model=UserSchema)#내 정보 수정
+def update_me_handler(
+    request: ProfileUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    user_repo: UserRepository = Depends(),
+):
+    # 닉네임을 바꾸면 다른 사람이 이미 쓰는지 확인한다 (자기 자신은 예외)
+    if request.nickname is not None and request.nickname != current_user.nickname:
+        existing = user_repo.get_user_by_nickname(request.nickname)
+        if existing is not None and existing.id != current_user.id:
+            raise HTTPException(status_code=409, detail="nickname already exists")
+        current_user.nickname = request.nickname
+
+    # bio 는 빈 문자열이면 소개를 지우는 것. None 이면 안 건드린다
+    if request.bio is not None:
+        current_user.bio = request.bio
+
+    return user_repo.update_user(current_user)
+
+
+@router.patch("/me/password", status_code=200)#비밀번호 변경
+def change_password_handler(
+    request: PasswordChangeRequest,
+    current_user: User = Depends(get_current_user),
+    user_repo: UserRepository = Depends(),
+    auth_service: AuthService = Depends(),
+):
+    # 현재 비번을 먼저 확인한다. 세션이 탈취돼도 현재 비번 없이는 못 바꾸게 (계정 탈취 방어)
+    if not auth_service.verify_password(request.current_password, current_user.password):
+        raise HTTPException(status_code=403, detail="current password does not match")
+
+    current_user.password = auth_service.hash_password(request.new_password)
+    user_repo.update_user(current_user)
+    return {"message": "password changed"}
 
 
 @router.get("/list", status_code=200, response_model=ListUserSchema)#회원 목록

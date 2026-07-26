@@ -16,6 +16,9 @@ nickname 제거 (작성자는 토큰에서)
 
 2026-07-25
 분류 이름 변경 / 글 분류 이동
+
+2026-07-26
+프로필 수정(닉네임·소개)
 '''
 
 from pydantic import BaseModel, EmailStr, Field
@@ -93,3 +96,14 @@ class SuspendRequest(BaseModel):
 
 class BanRequest(BaseModel):
     banned: bool
+
+
+class ProfileUpdateRequest(BaseModel):
+    # 둘 다 선택 — 보낸 것만 바뀐다. bio 는 ""이면 소개를 지우는 것
+    nickname: str | None = Field(default=None, min_length=2, max_length=20)   # 가입과 동일 규칙
+    bio: str | None = Field(default=None, max_length=500)
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str                                     # 본인 확인용 (세션 탈취 방어)
+    new_password: str = Field(min_length=8, max_length=72)   # bcrypt 72바이트 제한

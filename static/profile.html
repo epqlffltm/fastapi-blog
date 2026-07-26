@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>내 정보 · blog</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <header>
+        <div class="container">
+            <a href="/" class="logo">blog</a>
+            <nav></nav>
+        </div>
+    </header>
+
+    <main class="container">
+        <section id="profile" hidden>
+            <h1>내 정보</h1>
+            <form id="profile-form">
+                <div class="field">
+                    <label for="email">이메일</label>
+                    <!-- 이메일 변경은 지원하지 않으므로 읽기 전용 -->
+                    <input type="email" id="email" disabled>
+                </div>
+                <div class="field">
+                    <label for="nickname">닉네임</label>
+                    <input type="text" id="nickname" required minlength="2" maxlength="20"
+                        autocomplete="nickname">
+                </div>
+                <div class="field">
+                    <label for="bio">소개</label>
+                    <textarea id="bio" maxlength="500" rows="4"
+                        placeholder="자기소개를 입력하세요 (선택)"></textarea>
+                </div>
+                <p class="error" id="profile-error"></p>
+                <p class="notice" id="profile-done" hidden>저장되었습니다.</p>
+                <button type="submit" class="primary" id="profile-submit">저장</button>
+            </form>
+
+            <h2>비밀번호 변경</h2>
+            <form id="password-form">
+                <div class="field">
+                    <label for="current-password">현재 비밀번호</label>
+                    <input type="password" id="current-password" required
+                        autocomplete="current-password">
+                </div>
+                <div class="field">
+                    <label for="new-password">새 비밀번호 (8자 이상)</label>
+                    <input type="password" id="new-password" required minlength="8" maxlength="72"
+                        autocomplete="new-password">
+                </div>
+                <p class="error" id="password-error"></p>
+                <p class="notice" id="password-done" hidden>비밀번호가 변경되었습니다.</p>
+                <button type="submit" class="primary" id="password-submit">비밀번호 변경</button>
+            </form>
+        </section>
+
+        <p class="empty" id="status">불러오는 중…</p>
+    </main>
+
+    <script src="/js/api.js"></script>
+    <script src="/js/auth.js"></script>
+    <script src="/js/profile.js"></script>
+</body>
+</html>

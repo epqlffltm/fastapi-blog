@@ -1,4 +1,5 @@
 // 2026-07-24 로그인 상태 확인 및 헤더 렌더링
+// 2026-07-26 닉네임 → 내 정보(/profile) 링크
 
 // 쿠키는 JS가 읽을 수 없으므로, 로그인 여부는 서버에 물어봐야 안다
 async function getCurrentUser() {
@@ -54,8 +55,10 @@ async function renderHeader() {
             nav.append(state);
         }
 
-        const name = document.createElement("span");
+        // 닉네임을 누르면 내 정보 페이지로 간다
+        const name = document.createElement("a");
         name.className = "who";
+        name.href = "/profile";
         name.textContent = user.nickname;      // textContent: 태그가 실행되지 않는다
 
         const logout = document.createElement("button");

@@ -119,6 +119,7 @@ class UserSchema(BaseModel):
     id: int
     email: str
     nickname: str
+    bio: str | None
     is_verified: bool
 
     can_comment: bool

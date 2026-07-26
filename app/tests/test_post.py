@@ -55,7 +55,7 @@ def _make_post(id=1, title="테스트 글", contents="본문", user_id=1, nickna
 
 # ---------- 목록 조회 ----------
 
-def test_get_pages(client, mock_post_repo, mock_category_repo):
+def test_get_pages(client, mock_post_repo, mock_category_repo, mock_like_repo):
     mock_post_repo.get_posts.return_value = [_make_post(thumbnail_url="/img/a.png")]
     mock_post_repo.count_comments.return_value = 2
     mock_like_repo.count_for_post.return_value = 5
@@ -70,9 +70,11 @@ def test_get_pages(client, mock_post_repo, mock_category_repo):
     assert data["posts"][0]["category"]["slug"] == "dnd"
     assert data["posts"][0]["thumbnail_url"] == "/img/a.png"
     assert data["posts"][0]["comment_count"] == 2
+    assert data["posts"][0]["like_count"] == 5
+    assert data["posts"][0]["view_count"] == 0
 
 
-def test_get_pages_without_thumbnail(client, mock_post_repo, mock_category_repo):
+def test_get_pages_without_thumbnail(client, mock_post_repo, mock_category_repo, mock_like_repo):
     """이미지 없는 글은 썸네일이 null"""
     mock_post_repo.get_posts.return_value = [_make_post()]
     mock_post_repo.count_comments.return_value = 0
