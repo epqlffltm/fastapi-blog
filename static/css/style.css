@@ -767,3 +767,37 @@ select:focus { border-color: var(--accent); }
     font-size: 1.2rem;
     line-height: 1;
 }
+
+/* 프로필 이미지 */
+.avatar-box {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.avatar-preview {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 1px solid #444;
+    background: #2a2a2a;
+}
+
+/* 이미지가 없을 때(빈 아바타) */
+.avatar-preview.empty {
+    background: #2a2a2a
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 24 24' fill='%23666'%3E%3Cpath d='M12 12a5 5 0 100-10 5 5 0 000 10zm0 2c-5 0-9 2.5-9 6v2h18v-2c0-3.5-4-6-9-6z'/%3E%3C/svg%3E")
+        center/40px no-repeat;
+}
+
+/* 헤더 닉네임 옆 작은 아바타 */
+.who-avatar {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    object-fit: cover;
+    vertical-align: middle;
+    margin-right: 6px;
+}

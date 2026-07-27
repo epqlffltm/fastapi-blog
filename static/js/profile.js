@@ -10,6 +10,11 @@ const submitBtn = document.getElementById("profile-submit");
 const section = document.getElementById("profile");
 const statusEl = document.getElementById("status");
 
+const avatarPreview = document.getElementById("avatar-preview");
+const avatarInput = document.getElementById("avatar-input");
+const avatarBtn = document.getElementById("avatar-btn");
+const avatarError = document.getElementById("avatar-error");
+
 const passwordForm = document.getElementById("password-form");
 const currentPwEl = document.getElementById("current-password");
 const newPwEl = document.getElementById("new-password");
@@ -30,6 +35,7 @@ async function init() {
     emailEl.value = user.email;
     nicknameEl.value = user.nickname;
     bioEl.value = user.bio || "";      // bio 가 null 이면 빈 칸
+    renderAvatar(user.avatar_url);
 
     statusEl.hidden = true;
     section.hidden = false;
@@ -77,6 +83,47 @@ passwordForm.addEventListener("submit", async (e) => {
         pwErrorEl.textContent = err.message;      // 현재 비번 불일치(403) 등
     } finally {
         pwSubmitBtn.disabled = false;
+    }
+});
+
+// avatar_url 이 있으면 그 이미지, 없으면 기본 실루엣(빈 칸 스타일)
+function renderAvatar(url) {
+    if (url) {
+        avatarPreview.src = url;
+        avatarPreview.classList.remove("empty");
+    } else {
+        avatarPreview.removeAttribute("src");
+        avatarPreview.classList.add("empty");
+    }
+}
+
+// "이미지 변경" → 파일 선택창 열기
+avatarBtn.addEventListener("click", () => avatarInput.click());
+
+// 파일 고르면 바로 업로드
+avatarInput.addEventListener("change", async () => {
+    const file = avatarInput.files[0];
+    if (!file) return;
+    avatarError.textContent = "";
+    avatarBtn.disabled = true;
+
+    try {
+        const form = new FormData();
+        form.append("file", file);
+        // api.post 는 JSON 을 보내므로, 파일은 fetch 로 직접 보낸다
+        const res = await fetch("/user/me/avatar", { method: "POST", body: form });
+        if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            throw new Error(data.detail || "업로드 실패");
+        }
+        const updated = await res.json();
+        renderAvatar(updated.avatar_url);
+        renderHeader();      // 헤더의 avatar 도 갱신
+    } catch (err) {
+        avatarError.textContent = err.message;
+    } finally {
+        avatarBtn.disabled = false;
+        avatarInput.value = "";      // 같은 파일 다시 골라도 change 뜨게
     }
 });
 

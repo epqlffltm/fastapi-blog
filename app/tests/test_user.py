@@ -276,3 +276,91 @@ def test_decode_tampered_token():
 
     with pytest.raises(jwt.InvalidSignatureError):
         service.decode_jwt(forged)
+        
+def test_change_password(auth_client, mock_user_repo, current_user):
+    """현재 비번이 맞으면 새 비번으로 바뀐다"""
+    service = AuthService()
+    current_user.password = service.hash_password("oldpass123")   # 현재 비번을 실제 해시로
+
+    response = auth_client.patch("/user/me/password", json={
+        "current_password": "oldpass123",
+        "new_password": "newpass456",
+    })
+
+    assert response.status_code == 200
+    assert service.verify_password("newpass456", current_user.password) is True
+    mock_user_repo.update_user.assert_called_once()
+
+
+def test_change_password_wrong_current(auth_client, mock_user_repo, current_user):
+    """현재 비번이 틀리면 403, 안 바뀐다"""
+    service = AuthService()
+    current_user.password = service.hash_password("oldpass123")
+
+    response = auth_client.patch("/user/me/password", json={
+        "current_password": "WRONGpass",
+        "new_password": "newpass456",
+    })
+
+    assert response.status_code == 403
+    mock_user_repo.update_user.assert_not_called()
+
+
+def test_change_password_requires_login(client, mock_user_repo):
+    response = client.patch("/user/me/password", json={
+        "current_password": "whatever",
+        "new_password": "newpass456",
+    })
+
+    assert response.status_code == 401
+    mock_user_repo.update_user.assert_not_called()
+
+
+def test_change_password_short(auth_client, mock_user_repo, current_user):
+    """새 비번이 8자 미만이면 422"""
+    service = AuthService()
+    current_user.password = service.hash_password("oldpass123")
+
+    response = auth_client.patch("/user/me/password", json={
+        "current_password": "oldpass123",
+        "new_password": "short",
+    })
+
+    assert response.status_code == 422
+    mock_user_repo.update_user.assert_not_called()
+    
+def test_upload_avatar(auth_client, mock_user_repo, mock_upload_service):
+    """프로필 이미지 업로드 → avatar_url 저장"""
+    mock_upload_service.save.return_value = ("abc123.png", 1024)
+    mock_user_repo.update_user.side_effect = lambda u: u
+
+    response = auth_client.post(
+        "/user/me/avatar",
+        files={"file": ("me.png", b"fakeimage", "image/png")},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["avatar_url"] == "/img/abc123.png"
+    mock_upload_service.save.assert_awaited_once()
+    mock_user_repo.update_user.assert_called_once()
+
+
+def test_upload_avatar_requires_login(client, mock_upload_service):
+    response = client.post(
+        "/user/me/avatar",
+        files={"file": ("me.png", b"fakeimage", "image/png")},
+    )
+
+    assert response.status_code == 401
+    mock_upload_service.save.assert_not_awaited()
+
+
+def test_upload_avatar_blocked_when_banned(banned_client, mock_upload_service):
+    """제재 중엔 프로필 이미지도 못 올린다"""
+    response = banned_client.post(
+        "/user/me/avatar",
+        files={"file": ("me.png", b"fakeimage", "image/png")},
+    )
+
+    assert response.status_code == 403
+    mock_upload_service.save.assert_not_awaited()

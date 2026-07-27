@@ -17,6 +17,16 @@
     <main class="container">
         <section id="profile" hidden>
             <h1>내 정보</h1>
+
+            <div class="avatar-box">
+                <img id="avatar-preview" class="avatar-preview" alt="프로필 이미지">
+                <div>
+                    <input type="file" id="avatar-input" accept="image/*" hidden>
+                    <button type="button" class="ghost-btn" id="avatar-btn">이미지 변경</button>
+                    <p class="error" id="avatar-error"></p>
+                </div>
+            </div>
+
             <form id="profile-form">
                 <div class="field">
                     <label for="email">이메일</label>

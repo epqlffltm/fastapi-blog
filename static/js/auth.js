@@ -1,5 +1,5 @@
 // 2026-07-24 로그인 상태 확인 및 헤더 렌더링
-// 2026-07-26 닉네임 → 내 정보(/profile) 링크
+// 2026-07-26 닉네임 → 내 정보(/profile) 링크 / 헤더 avatar 표시
 
 // 쿠키는 JS가 읽을 수 없으므로, 로그인 여부는 서버에 물어봐야 안다
 async function getCurrentUser() {
@@ -59,7 +59,15 @@ async function renderHeader() {
         const name = document.createElement("a");
         name.className = "who";
         name.href = "/profile";
-        name.textContent = user.nickname;      // textContent: 태그가 실행되지 않는다
+        // avatar 가 있으면 닉네임 앞에 작은 원형 이미지
+        if (user.avatar_url) {
+            const av = document.createElement("img");
+            av.className = "who-avatar";
+            av.src = user.avatar_url;
+            av.alt = "";
+            name.append(av);
+        }
+        name.append(document.createTextNode(user.nickname));   // 태그 실행 안 되게 텍스트 노드
 
         const logout = document.createElement("button");
         logout.textContent = "로그아웃";

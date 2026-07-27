@@ -20,6 +20,9 @@ role → 권한 체크박스 / 정지 · 강퇴
 
 2026-07-26
 조회수 컬럼 / 좋아요(likes) 테이블
+
+2026-07-26
+프로필 이미지(avatar_url) 컬럼
 '''
 
 from sqlalchemy import ForeignKey, String, UniqueConstraint
@@ -151,6 +154,7 @@ class User(Base):    # 회원 테이블
     is_verified: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime]
     bio: Mapped[str | None] = mapped_column(String(500), default=None)   # 자기소개
+    avatar_url: Mapped[str | None] = mapped_column(String(255), default=None)   # 프로필 이미지 URL
 
     # 권한 — 등급 하나가 아니라 기능별로 켜고 끈다.
     # 새 기능이 생기면 컬럼 하나만 늘리면 되고, 등급표를 다시 짤 필요가 없다

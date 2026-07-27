@@ -11,7 +11,7 @@ httpOnly 쿠키 로그인 / 로그아웃
 '''
 
 from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response, UploadFile
 from ..database.connection import settings
 from ..database.orm import User
 from ..database.repository import UserRepository
@@ -23,9 +23,10 @@ from ..schema.request import (
 )
 from ..schema.response import ListUserSchema, UserSchema
 from ..service.auth import AuthService
+from ..service.upload import UploadService
 from ..service.email import EmailService
 from ..service.otp import OTPService
-from .dependency import get_current_user, require_permission, COOKIE_NAME
+from .dependency import get_current_user, get_active_user, require_permission, COOKIE_NAME
 
 router = APIRouter(prefix="/user", tags=["user"])
 
@@ -135,6 +136,20 @@ def change_password_handler(
     current_user.password = auth_service.hash_password(request.new_password)
     user_repo.update_user(current_user)
     return {"message": "password changed"}
+
+
+@router.post("/me/avatar", status_code=200, response_model=UserSchema)#프로필 이미지 업로드
+async def upload_avatar_handler(
+    file: UploadFile,
+    # 자기 프로필 이미지라 can_upload(글 이미지용) 대신 로그인+정상 회원이면 허용
+    current_user: User = Depends(get_active_user),
+    user_repo: UserRepository = Depends(),
+    upload_service: UploadService = Depends(),
+):
+    # 저장·검증(타입/크기)은 글 이미지와 같은 서비스를 재활용한다
+    filename, _size = await upload_service.save(file)
+    current_user.avatar_url = f"/img/{filename}"
+    return user_repo.update_user(current_user)
 
 
 @router.get("/list", status_code=200, response_model=ListUserSchema)#회원 목록
