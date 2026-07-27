@@ -122,19 +122,45 @@ def update_me_handler(
     return user_repo.update_user(current_user)
 
 
-@router.patch("/me/password", status_code=200)#비밀번호 변경
+@router.post("/me/password/otp", status_code=200)#비밀번호 변경용 코드 발송
+def send_password_change_otp_handler(
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    otp_service: OTPService = Depends(),
+    email_service: EmailService = Depends(),
+):
+    # 로그인된 본인의 이메일로만 보낸다 (요청에서 이메일을 안 받아, 남의 주소로 못 보냄)
+    if otp_service.start_cooldown(current_user.email, purpose="password_change"):
+        otp = otp_service.create_otp()
+        otp_service.save_otp(email=current_user.email, otp=otp, purpose="password_change")
+        background_tasks.add_task(
+            email_service.send_password_reset, current_user.email, otp
+        )
+    return {"message": "a code has been sent to your email"}
+
+
+@router.patch("/me/password", status_code=200)#비밀번호 변경 (현재 비번 + 이메일 OTP)
 def change_password_handler(
     request: PasswordChangeRequest,
     current_user: User = Depends(get_current_user),
     user_repo: UserRepository = Depends(),
     auth_service: AuthService = Depends(),
+    otp_service: OTPService = Depends(),
 ):
-    # 현재 비번을 먼저 확인한다. 세션이 탈취돼도 현재 비번 없이는 못 바꾸게 (계정 탈취 방어)
+    # 1) 현재 비번 확인 — 비번이 유출돼도 현재 비번을 모르면 막힌다
     if not auth_service.verify_password(request.current_password, current_user.password):
         raise HTTPException(status_code=403, detail="current password does not match")
 
+    # 2) 이메일 OTP 확인 — 비번을 알고 로그인했어도 이메일 계정까지 못 뚫으면 막힌다 (2차 인증)
+    saved = otp_service.get_otp(current_user.email, purpose="password_change")
+    if saved is None:
+        raise HTTPException(status_code=400, detail="otp expired or not issued")
+    if saved != request.otp:
+        raise HTTPException(status_code=400, detail="invalid otp")
+
     current_user.password = auth_service.hash_password(request.new_password)
     user_repo.update_user(current_user)
+    otp_service.delete_otp(current_user.email, purpose="password_change")   # 재사용 방지
     return {"message": "password changed"}
 
 

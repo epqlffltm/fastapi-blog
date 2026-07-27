@@ -105,5 +105,6 @@ class ProfileUpdateRequest(BaseModel):
 
 
 class PasswordChangeRequest(BaseModel):
-    current_password: str                                     # 본인 확인용 (세션 탈취 방어)
+    current_password: str                                     # 본인 확인용 (비번 유출 방어)
     new_password: str = Field(min_length=8, max_length=72)   # bcrypt 72바이트 제한
+    otp: int = Field(ge=100_000, le=999_999)                 # 이메일로 받은 6자리 (계정 탈취 방어)

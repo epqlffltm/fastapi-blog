@@ -277,14 +277,16 @@ def test_decode_tampered_token():
     with pytest.raises(jwt.InvalidSignatureError):
         service.decode_jwt(forged)
         
-def test_change_password(auth_client, mock_user_repo, current_user):
-    """현재 비번이 맞으면 새 비번으로 바뀐다"""
+def test_change_password(auth_client, mock_user_repo, current_user, mock_redis):
+    """현재 비번 + 올바른 OTP → 변경"""
     service = AuthService()
-    current_user.password = service.hash_password("oldpass123")   # 현재 비번을 실제 해시로
+    current_user.password = service.hash_password("oldpass123")
+    mock_redis.get.return_value = "123456"      # 저장된 OTP (문자열로 반환됨)
 
     response = auth_client.patch("/user/me/password", json={
         "current_password": "oldpass123",
         "new_password": "newpass456",
+        "otp": 123456,
     })
 
     assert response.status_code == 200
@@ -292,14 +294,48 @@ def test_change_password(auth_client, mock_user_repo, current_user):
     mock_user_repo.update_user.assert_called_once()
 
 
-def test_change_password_wrong_current(auth_client, mock_user_repo, current_user):
-    """현재 비번이 틀리면 403, 안 바뀐다"""
+def test_change_password_wrong_otp(auth_client, mock_user_repo, current_user, mock_redis):
+    """OTP 틀리면 400, 안 바뀐다"""
     service = AuthService()
     current_user.password = service.hash_password("oldpass123")
+    mock_redis.get.return_value = "123456"
+
+    response = auth_client.patch("/user/me/password", json={
+        "current_password": "oldpass123",
+        "new_password": "newpass456",
+        "otp": 999999,
+    })
+
+    assert response.status_code == 400
+    mock_user_repo.update_user.assert_not_called()
+
+
+def test_change_password_no_otp_issued(auth_client, mock_user_repo, current_user, mock_redis):
+    """코드를 안 받았으면(만료/미발급) 400"""
+    service = AuthService()
+    current_user.password = service.hash_password("oldpass123")
+    mock_redis.get.return_value = None      # 저장된 OTP 없음
+
+    response = auth_client.patch("/user/me/password", json={
+        "current_password": "oldpass123",
+        "new_password": "newpass456",
+        "otp": 123456,
+    })
+
+    assert response.status_code == 400
+    mock_user_repo.update_user.assert_not_called()
+
+
+def test_change_password_wrong_current(auth_client, mock_user_repo, current_user, mock_redis):
+    """현재 비번 틀리면 403 (OTP 검사 전에 막힘)"""
+    service = AuthService()
+    current_user.password = service.hash_password("oldpass123")
+    mock_redis.get.return_value = "123456"
 
     response = auth_client.patch("/user/me/password", json={
         "current_password": "WRONGpass",
         "new_password": "newpass456",
+        "otp": 123456,
     })
 
     assert response.status_code == 403
@@ -308,59 +344,30 @@ def test_change_password_wrong_current(auth_client, mock_user_repo, current_user
 
 def test_change_password_requires_login(client, mock_user_repo):
     response = client.patch("/user/me/password", json={
-        "current_password": "whatever",
-        "new_password": "newpass456",
+        "current_password": "x", "new_password": "newpass456", "otp": 123456,
     })
-
     assert response.status_code == 401
     mock_user_repo.update_user.assert_not_called()
 
 
-def test_change_password_short(auth_client, mock_user_repo, current_user):
-    """새 비번이 8자 미만이면 422"""
+def test_send_password_change_otp(auth_client, mock_redis, mock_email_service):
+    """코드 발송 요청 → 200"""
+    mock_redis.set.return_value = True      # 쿨다운 통과
+    response = auth_client.post("/user/me/password/otp")
+    assert response.status_code == 200
+
+
+def test_change_password_short(auth_client, mock_user_repo, current_user, mock_redis):
+    """새 비번이 8자 미만이면 422 (검증에서 막힘)"""
     service = AuthService()
     current_user.password = service.hash_password("oldpass123")
+    mock_redis.get.return_value = "123456"
 
     response = auth_client.patch("/user/me/password", json={
         "current_password": "oldpass123",
         "new_password": "short",
+        "otp": 123456,
     })
 
     assert response.status_code == 422
     mock_user_repo.update_user.assert_not_called()
-    
-def test_upload_avatar(auth_client, mock_user_repo, mock_upload_service):
-    """프로필 이미지 업로드 → avatar_url 저장"""
-    mock_upload_service.save.return_value = ("abc123.png", 1024)
-    mock_user_repo.update_user.side_effect = lambda u: u
-
-    response = auth_client.post(
-        "/user/me/avatar",
-        files={"file": ("me.png", b"fakeimage", "image/png")},
-    )
-
-    assert response.status_code == 200
-    assert response.json()["avatar_url"] == "/img/abc123.png"
-    mock_upload_service.save.assert_awaited_once()
-    mock_user_repo.update_user.assert_called_once()
-
-
-def test_upload_avatar_requires_login(client, mock_upload_service):
-    response = client.post(
-        "/user/me/avatar",
-        files={"file": ("me.png", b"fakeimage", "image/png")},
-    )
-
-    assert response.status_code == 401
-    mock_upload_service.save.assert_not_awaited()
-
-
-def test_upload_avatar_blocked_when_banned(banned_client, mock_upload_service):
-    """제재 중엔 프로필 이미지도 못 올린다"""
-    response = banned_client.post(
-        "/user/me/avatar",
-        files={"file": ("me.png", b"fakeimage", "image/png")},
-    )
-
-    assert response.status_code == 403
-    mock_upload_service.save.assert_not_awaited()

@@ -60,6 +60,15 @@
                     <input type="password" id="new-password" required minlength="8" maxlength="72"
                         autocomplete="new-password">
                 </div>
+                <div class="field">
+                    <label for="otp">이메일 인증 코드</label>
+                    <div class="otp-row">
+                        <input type="text" id="otp" inputmode="numeric" maxlength="6"
+                            placeholder="6자리 숫자" autocomplete="one-time-code">
+                        <button type="button" class="ghost-btn" id="otp-btn">코드 받기</button>
+                    </div>
+                    <p class="hint" id="otp-hint" hidden>가입한 이메일로 코드를 보냈습니다. (3분 유효)</p>
+                </div>
                 <p class="error" id="password-error"></p>
                 <p class="notice" id="password-done" hidden>비밀번호가 변경되었습니다.</p>
                 <button type="submit" class="primary" id="password-submit">비밀번호 변경</button>

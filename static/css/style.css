@@ -801,3 +801,12 @@ select:focus { border-color: var(--accent); }
     vertical-align: middle;
     margin-right: 6px;
 }
+
+/* 비번 변경 OTP 입력줄 */
+.otp-row {
+    display: flex;
+    gap: 8px;
+}
+.otp-row input {
+    flex: 1;
+}

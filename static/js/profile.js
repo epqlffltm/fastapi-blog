@@ -21,6 +21,9 @@ const newPwEl = document.getElementById("new-password");
 const pwErrorEl = document.getElementById("password-error");
 const pwDoneEl = document.getElementById("password-done");
 const pwSubmitBtn = document.getElementById("password-submit");
+const otpEl = document.getElementById("otp");
+const otpBtn = document.getElementById("otp-btn");
+const otpHint = document.getElementById("otp-hint");
 
 async function init() {
     const user = await renderHeader();
@@ -64,6 +67,21 @@ form.addEventListener("submit", async (e) => {
     }
 });
 
+// "코드 받기" → 로그인된 이메일로 OTP 발송
+otpBtn.addEventListener("click", async () => {
+    pwErrorEl.textContent = "";
+    otpHint.hidden = true;
+    otpBtn.disabled = true;
+    try {
+        await api.post("/user/me/password/otp", {});
+        otpHint.hidden = false;       // "이메일로 코드 보냄"
+    } catch (err) {
+        pwErrorEl.textContent = err.message;
+    } finally {
+        otpBtn.disabled = false;
+    }
+});
+
 passwordForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     pwErrorEl.textContent = "";
@@ -74,10 +92,13 @@ passwordForm.addEventListener("submit", async (e) => {
         await api.patch("/user/me/password", {
             current_password: currentPwEl.value,
             new_password: newPwEl.value,
+            otp: Number(otpEl.value),
         });
         // 성공 → 입력 비우고 안내
         currentPwEl.value = "";
         newPwEl.value = "";
+        otpEl.value = "";
+        otpHint.hidden = true;
         pwDoneEl.hidden = false;
     } catch (err) {
         pwErrorEl.textContent = err.message;      // 현재 비번 불일치(403) 등
