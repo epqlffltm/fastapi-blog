@@ -21,7 +21,7 @@ from ..schema.request import (
     PermissionUpdateRequest, SuspendRequest, BanRequest,
     ProfileUpdateRequest, PasswordChangeRequest,
 )
-from ..schema.response import ListUserSchema, UserSchema
+from ..schema.response import ListUserSchema, UserSchema, PublicUserSchema
 from ..service.auth import AuthService
 from ..service.upload import UploadService
 from ..service.email import EmailService
@@ -176,6 +176,18 @@ async def upload_avatar_handler(
     filename, _size = await upload_service.save(file)
     current_user.avatar_url = f"/img/{filename}"
     return user_repo.update_user(current_user)
+
+
+@router.get("/{id}/profile", status_code=200, response_model=PublicUserSchema)#남의 공개 프로필
+def get_public_profile_handler(
+    id: int,
+    user_repo: UserRepository = Depends(),
+):
+    # 로그인 불필요(공개). 공개 정보만 담은 PublicUserSchema 로 응답 → 이메일·권한은 안 새어나간다
+    user = user_repo.get_user_by_id(id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="user not found")
+    return user
 
 
 @router.get("/list", status_code=200, response_model=ListUserSchema)#회원 목록

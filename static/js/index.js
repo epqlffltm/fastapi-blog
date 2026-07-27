@@ -93,12 +93,20 @@ function createPostItem(post) {
     category.className = "category-tag";
     category.textContent = post.category.name;
 
+    // 작성자 닉네임은 그 사람 공개 프로필로 가는 링크
+    const sep1 = document.createElement("span");
+    sep1.textContent = " · ";
+    const authorLink = document.createElement("a");
+    authorLink.href = `/user/${post.user.id}`;
+    authorLink.className = "author-link";
+    authorLink.textContent = post.user.nickname;      // 사용자 입력이므로 textContent
+
     const rest = document.createElement("span");
     rest.textContent =
-        ` · ${post.user.nickname} · ${formatDate(post.created_at)}` +
+        ` · ${formatDate(post.created_at)}` +
         ` · 조회 ${post.view_count} · 좋아요 ${post.like_count} · 댓글 ${post.comment_count}`;
 
-    meta.append(category, rest);
+    meta.append(category, sep1, authorLink, rest);
     li.append(h2, meta);
 
     if (post.thumbnail_url) {

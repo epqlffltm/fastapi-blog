@@ -37,13 +37,16 @@ class PostRepository:
         self.session = session
 
     def get_posts(
-        self, order: str, category_id: int | None = None, include_deleted: bool = False
+        self, order: str, category_id: int | None = None,
+        user_id: int | None = None, include_deleted: bool = False
     ) -> list[Post]:
         stmt = select(Post)
         if not include_deleted:
             stmt = stmt.where(Post.is_deleted == False)
         if category_id is not None:
             stmt = stmt.where(Post.category_id == category_id)
+        if user_id is not None:                       # 특정 작성자의 글만 (프로필용)
+            stmt = stmt.where(Post.user_id == user_id)
         if order == "asc":
             stmt = stmt.order_by(Post.created_at.asc())
         elif order == "desc":

@@ -101,7 +101,7 @@ def test_get_pages_order_asc(client, mock_post_repo, mock_category_repo):
 
     client.get("/pages?order=asc")
 
-    mock_post_repo.get_posts.assert_called_once_with(order="asc", category_id=None, include_deleted=False)
+    mock_post_repo.get_posts.assert_called_once_with(order="asc", category_id=None, user_id=None, include_deleted=False)
 
 
 def test_get_pages_filtered_by_category(client, mock_post_repo, mock_category_repo):
@@ -111,7 +111,7 @@ def test_get_pages_filtered_by_category(client, mock_post_repo, mock_category_re
     response = client.get("/pages?category=dnd&order=desc")
 
     assert response.status_code == 200
-    mock_post_repo.get_posts.assert_called_once_with(order="desc", category_id=7, include_deleted=False)
+    mock_post_repo.get_posts.assert_called_once_with(order="desc", category_id=7, user_id=None, include_deleted=False)
 
 
 def test_get_pages_unknown_category(client, mock_post_repo, mock_category_repo):
@@ -331,7 +331,7 @@ def test_admin_sees_deleted_posts_in_list(admin_viewer, mock_post_repo, mock_cat
     mock_post_repo.get_posts.return_value = []
     admin_viewer.get("/pages?order=desc")
     mock_post_repo.get_posts.assert_called_once_with(
-        order="desc", category_id=None, include_deleted=True
+        order="desc", category_id=None, user_id=None, include_deleted=True
     )
 
 
@@ -339,7 +339,7 @@ def test_anonymous_does_not_see_deleted_posts(client, mock_post_repo, mock_categ
     mock_post_repo.get_posts.return_value = []
     client.get("/pages?order=desc")
     mock_post_repo.get_posts.assert_called_once_with(
-        order="desc", category_id=None, include_deleted=False
+        order="desc", category_id=None, user_id=None, include_deleted=False
     )
 
 

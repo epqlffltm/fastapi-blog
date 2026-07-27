@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>프로필 · blog</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <header>
+        <div class="container">
+            <a href="/" class="logo">blog</a>
+            <nav></nav>
+        </div>
+    </header>
+
+    <main class="container">
+        <section id="user-profile" hidden>
+            <div class="avatar-box">
+                <img id="pub-avatar" class="avatar-preview" alt="프로필 이미지">
+                <div>
+                    <h1 id="pub-nickname"></h1>
+                    <p id="pub-bio" class="bio"></p>
+                </div>
+            </div>
+
+            <h2>작성한 글</h2>
+            <ul class="post-list" id="pub-posts"></ul>
+            <p class="empty" id="pub-posts-empty" hidden>아직 작성한 글이 없습니다.</p>
+        </section>
+
+        <p class="empty" id="status">불러오는 중…</p>
+    </main>
+
+    <script src="/js/api.js"></script>
+    <script src="/js/auth.js"></script>
+    <script src="/js/user.js"></script>
+</body>
+</html>

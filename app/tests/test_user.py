@@ -371,3 +371,26 @@ def test_change_password_short(auth_client, mock_user_repo, current_user, mock_r
 
     assert response.status_code == 422
     mock_user_repo.update_user.assert_not_called()
+    
+def test_get_public_profile(client, mock_user_repo):
+    """남의 공개 프로필 — 공개 정보만 나오고 이메일·권한은 안 나온다"""
+    user = _make_user(id=3, nickname="other")
+    user.bio = "안녕"
+    user.email = "secret@example.com"
+    mock_user_repo.get_user_by_id.return_value = user
+
+    response = client.get("/user/3/profile")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["nickname"] == "other"
+    assert body["bio"] == "안녕"
+    # 공개 프로필엔 이메일·권한이 절대 없어야 한다
+    assert "email" not in body
+    assert "can_manage_user" not in body
+
+
+def test_get_public_profile_not_found(client, mock_user_repo):
+    mock_user_repo.get_user_by_id.return_value = None
+    response = client.get("/user/999/profile")
+    assert response.status_code == 404

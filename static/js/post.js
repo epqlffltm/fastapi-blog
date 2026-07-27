@@ -1,6 +1,7 @@
 // 2026-07-24 글 상세 + 댓글 (본문은 마크다운 뷰어로 렌더, 답글은 1단계)
 // 2026-07-25 관리자(can_manage_post) 수정·삭제 노출 / 삭제됨 뱃지 / 삭제 복구
 // 2026-07-26 조회수 표시 / 좋아요 버튼
+// 2026-07-27 작성자 닉네임 → 공개 프로필 링크
 
 const postId = new URLSearchParams(location.search).get("id");
 
@@ -80,10 +81,17 @@ function render(post) {
     const category = document.createElement("span");
     category.className = "category-tag";
     category.textContent = post.category.name;
+    // 작성자 닉네임은 그 사람 공개 프로필로 가는 링크
+    const sep1 = document.createElement("span");
+    sep1.textContent = " · ";
+    const authorLink = document.createElement("a");
+    authorLink.href = `/user/${post.user.id}`;
+    authorLink.className = "author-link";
+    authorLink.textContent = post.user.nickname;      // 사용자 입력이므로 textContent
+
     const rest = document.createElement("span");
-    rest.textContent =
-        ` · ${post.user.nickname} · ${formatDate(post.created_at)} · 조회 ${post.view_count}`;
-    metaEl.append(category, rest);
+    rest.textContent = ` · ${formatDate(post.created_at)} · 조회 ${post.view_count}`;
+    metaEl.append(category, sep1, authorLink, rest);
 
     // 삭제된 글이면(관리자만 여기까지 온다) 제목 옆 뱃지 + post-actions 에 복구 버튼
     if (post.is_deleted) {

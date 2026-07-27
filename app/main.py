@@ -62,5 +62,12 @@ for _page in PAGES:
     )
 
 
+# 남의 공개 프로필 페이지 (/user/3 처럼 id 가 변하는 동적 경로).
+# API(/user/{id}/profile)와 경로가 겹치지 않는다. user.html 이 JS 로 id 를 읽어 데이터를 불러온다
+@app.get("/user/{id}", include_in_schema=False)
+async def serve_user_page(id: int):
+    return FileResponse(STATIC_DIR / "user.html")
+
+
 # html=True → "/" 요청에 index.html을 돌려준다
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

@@ -113,6 +113,16 @@ class LikeResultSchema(BaseModel):
     liked: bool          # 지금 보는 사람이 눌렀는지
 
 
+# 남의 프로필용 — 공개해도 되는 정보만 (이메일·권한·제재상태는 절대 안 담는다)
+class PublicUserSchema(BaseModel):
+    id: int
+    nickname: str
+    bio: str | None
+    avatar_url: str | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class UserSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

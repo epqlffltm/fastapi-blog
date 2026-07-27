@@ -54,6 +54,7 @@ VIEW_DEDUP_TTL_SECONDS = 60 * 60 * 6   # 6시간
 def get_pages_handler(
     order: str = "random",
     category: str | None = None,
+    author: int | None = None,          # 특정 작성자의 글만 (프로필용)
     # 비로그인도 허용. 관리자면 삭제 글까지 본다
     viewer: User | None = Depends(get_current_user_optional),
     post_repo: PostRepository = Depends(),
@@ -70,7 +71,8 @@ def get_pages_handler(
     # 관리자(글 관리 권한)만 삭제된 글도 목록에서 본다
     include_deleted = viewer is not None and viewer.can_manage_post
     posts = post_repo.get_posts(
-        order=order.lower(), category_id=category_id, include_deleted=include_deleted
+        order=order.lower(), category_id=category_id,
+        user_id=author, include_deleted=include_deleted
     )
 
     result = []
