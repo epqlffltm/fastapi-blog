@@ -191,12 +191,20 @@ def test_expired_suspension_is_not_active():
     assert user.is_active is True
 
 
-def test_naive_suspended_until_is_treated_as_utc():
-    """DB 컬럼이 시간대를 보관하지 않아도 비교가 깨지지 않는다"""
-    naive = (datetime.now(timezone.utc) + timedelta(days=1)).replace(tzinfo=None)
-    user = _make_user(suspended_until=naive)
+def test_suspended_until_in_future_is_suspended():
+    """정지 해제 시각이 미래면 is_suspended True (컬럼이 timestamptz 라 aware 로 비교)"""
+    future = datetime.now(timezone.utc) + timedelta(days=1)
+    user = _make_user(suspended_until=future)
 
     assert user.is_suspended is True
+
+
+def test_suspended_until_in_past_is_not_suspended():
+    """정지 해제 시각이 지났으면 is_suspended False"""
+    past = datetime.now(timezone.utc) - timedelta(days=1)
+    user = _make_user(suspended_until=past)
+
+    assert user.is_suspended is False
 
 
 # ---------- 강퇴 ----------

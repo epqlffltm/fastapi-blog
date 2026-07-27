@@ -103,7 +103,7 @@ def banned_client(client, current_user):
 
 @pytest.fixture
 def mock_post_repo():
-    repo = Mock(spec=PostRepository)
+    repo = AsyncMock(spec=PostRepository)
     app.dependency_overrides[PostRepository] = lambda: repo
     yield repo
     app.dependency_overrides.clear()
@@ -111,7 +111,7 @@ def mock_post_repo():
 
 @pytest.fixture
 def mock_like_repo():
-    repo = Mock(spec=LikeRepository)
+    repo = AsyncMock(spec=LikeRepository)
     app.dependency_overrides[LikeRepository] = lambda: repo
     yield repo
     app.dependency_overrides.clear()
@@ -119,7 +119,7 @@ def mock_like_repo():
 
 @pytest.fixture
 def mock_comment_repo():
-    repo = Mock(spec=CommentRepository)
+    repo = AsyncMock(spec=CommentRepository)
     app.dependency_overrides[CommentRepository] = lambda: repo
     yield repo
     app.dependency_overrides.clear()
@@ -127,7 +127,7 @@ def mock_comment_repo():
 
 @pytest.fixture
 def mock_user_repo():
-    repo = Mock(spec=UserRepository)
+    repo = AsyncMock(spec=UserRepository)
     app.dependency_overrides[UserRepository] = lambda: repo
     yield repo
     app.dependency_overrides.clear()
@@ -135,7 +135,7 @@ def mock_user_repo():
 
 @pytest.fixture
 def mock_category_repo():
-    repo = Mock(spec=CategoryRepository)
+    repo = AsyncMock(spec=CategoryRepository)
     app.dependency_overrides[CategoryRepository] = lambda: repo
     yield repo
     app.dependency_overrides.clear()
@@ -143,7 +143,7 @@ def mock_category_repo():
 
 @pytest.fixture
 def mock_upload_repo():
-    repo = Mock(spec=UploadRepository)
+    repo = AsyncMock(spec=UploadRepository)
     app.dependency_overrides[UploadRepository] = lambda: repo
     yield repo
     app.dependency_overrides.clear()

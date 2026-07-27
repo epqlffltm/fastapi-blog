@@ -1,0 +1,53 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.13.12, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\study\project\fastapi-blog
+configfile: pyproject.toml
+plugins: anyio-4.14.2, asyncio-1.4.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 172 items
+
+app\tests\test_category.py ...................                           [ 11%]
+app\tests\test_comment.py .......................                        [ 24%]
+app\tests\test_main.py .                                                 [ 25%]
+app\tests\test_otp.py .............                                      [ 32%]
+app\tests\test_password_reset.py ........                                [ 37%]
+app\tests\test_permission.py ................F............               [ 54%]
+app\tests\test_post.py .........................................         [ 77%]
+app\tests\test_upload.py ..........                                      [ 83%]
+app\tests\test_user.py ............................                      [100%]
+
+================================== FAILURES ===================================
+________________ test_naive_suspended_until_is_treated_as_utc _________________
+
+    def test_naive_suspended_until_is_treated_as_utc():
+        """DB 컬럼이 시간대를 보관하지 않아도 비교가 깨지지 않는다"""
+        naive = (datetime.now(timezone.utc) + timedelta(days=1)).replace(tzinfo=None)
+        user = _make_user(suspended_until=naive)
+    
+>       assert user.is_suspended is True
+               ^^^^^^^^^^^^^^^^^
+
+app\tests\test_permission.py:199: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = User(id=2, email=other@example.com)
+
+    @property
+    def is_suspended(self) -> bool:
+        if self.suspended_until is None:
+            return False
+        # 컬럼이 timestamptz(시간대 포함)라 DB 에서 읽어도 aware. 그대로 비교하면 된다
+>       return self.suspended_until > datetime.now(timezone.utc)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: can't compare offset-naive and offset-aware datetimes
+
+app\database\orm.py:180: TypeError
+============================== warnings summary ===============================
+.venv\Lib\site-packages\fastapi\testclient.py:1
+  D:\study\project\fastapi-blog\.venv\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED app/tests/test_permission.py::test_naive_suspended_until_is_treated_as_utc
+================== 1 failed, 171 passed, 1 warning in 8.73s ===================

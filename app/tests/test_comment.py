@@ -289,7 +289,7 @@ def test_visible_sorts_by_time():
 
 # ---------- 자리표시자 응답 ----------
 
-def test_deleted_comment_hides_contents(client, mock_post_repo):
+def test_deleted_comment_hides_contents(client, mock_post_repo, mock_redis, mock_like_repo):
     """삭제된 댓글의 내용과 작성자는 응답에 담기지 않는다"""
     post = _make_post()
     post.comments = [
@@ -297,6 +297,9 @@ def test_deleted_comment_hides_contents(client, mock_post_repo):
         _make_comment(id=2, parent_id=1, contents="답글", minutes=1),
     ]
     mock_post_repo.get_post_by_id.return_value = post
+    mock_redis.set.return_value = True                  # 조회수: 처음 보는 IP
+    mock_post_repo.increment_view_count.return_value = 1
+    mock_like_repo.count_for_post.return_value = 0
 
     response = client.get("/page/1")
 
