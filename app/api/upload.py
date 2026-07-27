@@ -25,7 +25,7 @@ async def upload_handler(
 ):
     filename, size = await upload_service.save(file)
 
-    upload_repo.save(
+    await upload_repo.save(
         Upload.create(
             user_id=current_user.id,
             filename=filename,

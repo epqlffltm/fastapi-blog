@@ -9,10 +9,13 @@ Settings에 필드 추가
 
 2026-07-24
 쿠키 설정 추가
+
+2026-07-27
+async 전환 (asyncpg) / echo 를 설정으로
 '''
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, DeclarativeBase
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from sqlalchemy.orm import DeclarativeBase
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -31,19 +34,33 @@ class Settings(BaseSettings):
     cookie_secure: bool = False    # 추가: 배포(HTTPS)에서 true
     cookie_max_age: int = 86400
     upload_max_bytes: int = 5 * 1024 * 1024
+    db_echo: bool = False    # 배포에선 False, 로컬 디버깅 때만 True
 
 
 settings = Settings()
 
-engine = create_engine(settings.database_url, echo=True)
-SessionFactory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# psycopg(동기) URL 이 들어와도 asyncpg(비동기) 드라이버로 바꿔 쓴다.
+# .env 를 postgresql+asyncpg://... 로 바꿔도 되지만, 안전하게 코드에서도 보정
+def _to_async_url(url: str) -> str:
+    if url.startswith("postgresql+psycopg://"):
+        return url.replace("postgresql+psycopg://", "postgresql+asyncpg://", 1)
+    if url.startswith("postgresql://"):
+        return url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    return url
+
+
+engine = create_async_engine(_to_async_url(settings.database_url), echo=settings.db_echo)
+SessionFactory = async_sessionmaker(
+    bind=engine, autocommit=False, autoflush=False, expire_on_commit=False
+)
+
 
 class Base(DeclarativeBase):
     pass
 
-def get_db():
-    session = SessionFactory()
-    try:
+
+# async 의존성 — 요청마다 AsyncSession 을 열고, 끝나면 닫는다
+async def get_db():
+    async with SessionFactory() as session:
         yield session
-    finally:
-        session.close()

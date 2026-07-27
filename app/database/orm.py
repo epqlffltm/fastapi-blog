@@ -20,12 +20,9 @@ role → 권한 체크박스 / 정지 · 강퇴
 
 2026-07-26
 조회수 컬럼 / 좋아요(likes) 테이블
-
-2026-07-26
-프로필 이미지(avatar_url) 컬럼
 '''
 
-from sqlalchemy import ForeignKey, String, UniqueConstraint
+from sqlalchemy import ForeignKey, String, UniqueConstraint, DateTime
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime, timezone
 from .connection import Base    # connection의 Base 재사용 (새로 만들지 않음)
@@ -51,8 +48,8 @@ class Post(Base):
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     category_id: Mapped[int] = mapped_column(ForeignKey("categories.id"), index=True)
-    created_at: Mapped[datetime]
-    updated_at: Mapped[datetime]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     title: Mapped[str]
     contents: Mapped[str]                              # 마크다운 원문
     thumbnail_url: Mapped[str | None] = mapped_column(String(512), default=None)
@@ -62,7 +59,7 @@ class Post(Base):
     # N:1 이라 joined 로딩이 적합 (글 하나당 작성자·분류 하나)
     user: Mapped["User"] = relationship(back_populates="posts", lazy="joined")
     category: Mapped["Category"] = relationship(back_populates="posts", lazy="joined")
-    comments: Mapped[list["Comment"]] = relationship(back_populates="post")
+    comments: Mapped[list["Comment"]] = relationship(back_populates="post", lazy="selectin")
 
     def __repr__(self):
         return f"Post(id={self.id}, title={self.title})"
@@ -91,8 +88,8 @@ class Comment(Base):
     parent_id: Mapped[int | None] = mapped_column(
         ForeignKey("comments.id"), index=True, default=None
     )
-    created_at: Mapped[datetime]
-    updated_at: Mapped[datetime]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     contents: Mapped[str]
     is_deleted: Mapped[bool] = mapped_column(default=False)
 
@@ -124,7 +121,7 @@ class Upload(Base):    # 업로드된 파일 기록 (본문 위치는 마크다�
     original_name: Mapped[str] = mapped_column(String(256))
     content_type: Mapped[str] = mapped_column(String(64))
     size: Mapped[int]
-    created_at: Mapped[datetime]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
     def __repr__(self):
         return f"Upload(id={self.id}, filename={self.filename})"
@@ -152,7 +149,7 @@ class User(Base):    # 회원 테이블
     password: Mapped[str] = mapped_column(String(256))
     nickname: Mapped[str] = mapped_column(String(64), unique=True)
     is_verified: Mapped[bool] = mapped_column(default=False)
-    created_at: Mapped[datetime]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     bio: Mapped[str | None] = mapped_column(String(500), default=None)   # 자기소개
     avatar_url: Mapped[str | None] = mapped_column(String(255), default=None)   # 프로필 이미지 URL
 
@@ -166,11 +163,11 @@ class User(Base):    # 회원 테이블
     can_manage_post: Mapped[bool] = mapped_column(default=False)
 
     # 제재 — 정지는 기한이 지나면 저절로 풀리고, 강퇴는 사람이 풀어야 한다
-    suspended_until: Mapped[datetime | None] = mapped_column(default=None)
+    suspended_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     is_banned: Mapped[bool] = mapped_column(default=False)
 
-    posts: Mapped[list["Post"]] = relationship(back_populates="user")
-    comments: Mapped[list["Comment"]] = relationship(back_populates="user")
+    posts: Mapped[list["Post"]] = relationship(back_populates="user", lazy="selectin")
+    comments: Mapped[list["Comment"]] = relationship(back_populates="user", lazy="selectin")
 
     def __repr__(self):
         return f"User(id={self.id}, email={self.email})"
@@ -179,12 +176,8 @@ class User(Base):    # 회원 테이블
     def is_suspended(self) -> bool:
         if self.suspended_until is None:
             return False
-        until = self.suspended_until
-        # 컬럼이 TIMESTAMP WITHOUT TIME ZONE 이라 DB 에서 읽으면 시간대가 없다.
-        # 넣을 때 항상 UTC 이므로 그렇게 간주하고 비교한다 (안 맞추면 TypeError)
-        if until.tzinfo is None:
-            until = until.replace(tzinfo=timezone.utc)
-        return until > datetime.now(timezone.utc)
+        # 컬럼이 timestamptz(시간대 포함)라 DB 에서 읽어도 aware. 그대로 비교하면 된다
+        return self.suspended_until > datetime.now(timezone.utc)
 
     @property
     def is_active(self) -> bool:
@@ -226,7 +219,7 @@ class Category(Base):    # 글 분류 (사이드바)
     name: Mapped[str] = mapped_column(String(32), unique=True)              # 화면에 보이는 이름
     display_order: Mapped[int] = mapped_column(default=0)
 
-    posts: Mapped[list["Post"]] = relationship(back_populates="category")
+    posts: Mapped[list["Post"]] = relationship(back_populates="category", lazy="selectin")
 
     def __repr__(self):
         return f"Category(id={self.id}, slug={self.slug})"
@@ -247,7 +240,7 @@ class Like(Base):    # 글 좋아요
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     post_id: Mapped[int] = mapped_column(ForeignKey("posts.id"), index=True)
-    created_at: Mapped[datetime]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
     # (user_id, post_id) 조합을 유일하게 — 한 사람이 같은 글에 두 번 좋아요 못 누른다.
     # 중복 방지를 앱 로직이 아니라 DB 제약으로 보장한다

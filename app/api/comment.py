@@ -11,6 +11,9 @@ repository 패턴 적용
 2026-07-24
 댓글 작성에 이메일 인증 요구
 대댓글 (1단계)
+
+2026-07-27
+async 전환 (await) / 저장 후 fresh 재조회로 새 댓글 즉시 반영
 '''
 
 from fastapi import APIRouter, Depends, HTTPException, Body
@@ -25,19 +28,19 @@ from .dependency import get_current_user, get_active_user, require_permission
 router = APIRouter(tags=["comment"])
 
 @router.post("/page/{post_id}/comment", status_code=201, response_model=PostDetailSchema)#댓글 쓰기
-def create_comment_handler(
+async def create_comment_handler(
     post_id: int,
     request: CommentCreate,
     current_user: User = Depends(require_permission("can_comment")),
     post_repo: PostRepository = Depends(),
     comment_repo: CommentRepository = Depends(),
 ):
-    post = post_repo.get_post_by_id(post_id)
+    post = await post_repo.get_post_by_id(post_id)
     if post is None:
         raise HTTPException(status_code=404, detail="post not found")
 
     if request.parent_id is not None:
-        parent = comment_repo.get_comment_by_id(request.parent_id)
+        parent = await comment_repo.get_comment_by_id(request.parent_id)
         if parent is None or parent.post_id != post_id:
             # 다른 글의 댓글에 답글을 달 수 없다
             raise HTTPException(status_code=400, detail="parent comment not found")
@@ -48,23 +51,24 @@ def create_comment_handler(
     comment = Comment.create(
         request=request, post_id=post_id, user_id=current_user.id
     )
-    comment_repo.save(comment)
+    await comment_repo.save(comment)
 
-    # 새 댓글 반영된 글 다시 읽기
-    post = post_repo.get_post_by_id(post_id)
+    # 새 댓글이 반영된 글을 다시 읽는다. fresh=True 로 세션 캐시를 무시해야
+    # 방금 추가한 댓글까지 포함된 최신 comments 가 로드된다
+    post = await post_repo.get_post_by_id(post_id, fresh=True)
     post.comments = visible_comments(post.comments)
     return post
 
 
 @router.patch("/comment/{id}", status_code=200)#댓글 수정
-def update_comment_handler(
+async def update_comment_handler(
     id: int,
     contents: str = Body(..., embed=True),
     # 수정은 새 내용을 만드는 일이므로 제재 중엔 막는다
     current_user: User = Depends(get_active_user),
     comment_repo: CommentRepository = Depends(),
 ):
-    comment = comment_repo.get_comment_by_id(id)
+    comment = await comment_repo.get_comment_by_id(id)
     if comment is None:
         raise HTTPException(status_code=404, detail="comment not found")
     if comment.user_id != current_user.id:      # 내 댓글만 수정 가능
@@ -72,17 +76,17 @@ def update_comment_handler(
 
     comment.contents = contents
     comment.updated_at = datetime.now(timezone.utc)
-    comment = comment_repo.update(comment)
+    comment = await comment_repo.update(comment)
     return {"id": comment.id, "contents": comment.contents}
 
 
 @router.delete("/comment/{id}", status_code=204)#댓글 삭제
-def delete_comment_handler(
+async def delete_comment_handler(
     id: int,
     current_user: User = Depends(get_current_user),
     comment_repo: CommentRepository = Depends(),
 ):
-    comment = comment_repo.get_comment_by_id(id)
+    comment = await comment_repo.get_comment_by_id(id)
     if comment is None:
         raise HTTPException(status_code=404, detail="comment not found")
     if comment.user_id != current_user.id:      # 내 댓글만 삭제 가능
@@ -91,5 +95,5 @@ def delete_comment_handler(
     # 소프트삭제. 답글이 달려 있으면 자리표시자로 남는다
     comment.is_deleted = True
     comment.updated_at = datetime.now(timezone.utc)
-    comment_repo.update(comment)
+    await comment_repo.update(comment)
     return

@@ -51,7 +51,7 @@ VIEW_DEDUP_TTL_SECONDS = 60 * 60 * 6   # 6시간
 
 
 @router.get("/pages", status_code=200, response_model=ListPostSchema)#글 목록 보기
-def get_pages_handler(
+async def get_pages_handler(
     order: str = "random",
     category: str | None = None,
     author: int | None = None,          # 특정 작성자의 글만 (프로필용)
@@ -63,21 +63,21 @@ def get_pages_handler(
 ):
     category_id = None
     if category is not None:
-        found = category_repo.get_category_by_slug(category)
+        found = await category_repo.get_category_by_slug(category)
         if found is None:
             raise HTTPException(status_code=404, detail="category not found")
         category_id = found.id
 
     # 관리자(글 관리 권한)만 삭제된 글도 목록에서 본다
     include_deleted = viewer is not None and viewer.can_manage_post
-    posts = post_repo.get_posts(
+    posts = await post_repo.get_posts(
         order=order.lower(), category_id=category_id,
         user_id=author, include_deleted=include_deleted
     )
 
     result = []
     for post in posts:
-        comment_count = post_repo.count_comments(post.id)
+        comment_count = await post_repo.count_comments(post.id)
         result.append(
             PostListItemSchema(
                 id=post.id,
@@ -89,7 +89,7 @@ def get_pages_handler(
                 comment_count=comment_count,
                 is_deleted=post.is_deleted,
                 view_count=post.view_count,
-                like_count=like_repo.count_for_post(post.id),
+                like_count=await like_repo.count_for_post(post.id),
             )
         )
 
@@ -97,7 +97,7 @@ def get_pages_handler(
 
 
 @router.get("/page/{id}", status_code=200, response_model=PostDetailSchema)#글 읽기
-def get_page_handler(
+async def get_page_handler(
     id: int,
     request: Request,
     # 관리자면 삭제된 글도 열 수 있다. 아니면 안 잡혀서 404
@@ -106,7 +106,7 @@ def get_page_handler(
     redis: Redis = Depends(get_redis_client),
 ):
     is_admin = viewer is not None and viewer.can_manage_post
-    post = post_repo.get_post_by_id(id, include_deleted=is_admin)
+    post = await post_repo.get_post_by_id(id, include_deleted=is_admin)
     if post is None:
         raise HTTPException(status_code=404, detail="post not found")
 
@@ -118,7 +118,7 @@ def get_page_handler(
             f"viewed:{post.id}:{ip}", "1", nx=True, ex=VIEW_DEDUP_TTL_SECONDS
         )
         if first_view:
-            post.view_count = post_repo.increment_view_count(post.id)
+            post.view_count = await post_repo.increment_view_count(post.id)
 
     # relationship 은 삭제 여부를 안 가리므로 표시 규칙을 직접 적용한다
     post.comments = visible_comments(post.comments)
@@ -126,24 +126,24 @@ def get_page_handler(
 
 
 @router.post("/page", status_code=201, response_model=PostDetailSchema)#본문 쓰기
-def create_post_handler(
+async def create_post_handler(
     request: PostCreate,
     current_user: User = Depends(require_permission("can_write_post")),
     post_repo: PostRepository = Depends(),
     category_repo: CategoryRepository = Depends(),
 ):
-    if category_repo.get_category_by_id(request.category_id) is None:
+    if await category_repo.get_category_by_id(request.category_id) is None:
         raise HTTPException(status_code=400, detail="category not found")
 
     post = Post.create(request=request, user_id=current_user.id)
     # 목록 미리보기용. 매번 본문을 훑지 않도록 쓸 때 한 번만 계산한다
     post.thumbnail_url = extract_first_image(request.contents)
-    post = post_repo.save(post)
+    post = await post_repo.save(post)
     return post
 
 
 @router.patch("/page/{id}", status_code=200, response_model=PostDetailSchema)#본문 수정
-def update_post_handler(
+async def update_post_handler(
     id: int,
     title: Optional[str] = Body(None, embed=True),
     contents: Optional[str] = Body(None, embed=True),
@@ -152,7 +152,7 @@ def update_post_handler(
     current_user: User = Depends(get_active_user),
     post_repo: PostRepository = Depends(),
 ):
-    post = post_repo.get_post_by_id(id)
+    post = await post_repo.get_post_by_id(id)
     if post is None:
         raise HTTPException(status_code=404, detail="post not found")
     # 관리자(can_manage_post)는 남의 글도 손댈 수 있다. 아니면 작성자 본인만
@@ -165,20 +165,20 @@ def update_post_handler(
         post.contents = contents
         post.thumbnail_url = extract_first_image(contents)   # 본문이 바뀌면 썸네일도
     post.updated_at = datetime.now(timezone.utc)
-    post = post_repo.update(post)
+    post = await post_repo.update(post)
 
     post.comments = visible_comments(post.comments)
     return post
 
 
 @router.delete("/page/{id}", status_code=204)#본문 삭제
-def delete_post_handler(
+async def delete_post_handler(
     id: int,
     # 지우는 건 언제나 허용한다. 제재 중이라고 자기 글을 못 내리게 할 이유가 없다
     current_user: User = Depends(get_current_user),
     post_repo: PostRepository = Depends(),
 ):
-    post = post_repo.get_post_by_id(id)
+    post = await post_repo.get_post_by_id(id)
     if post is None:
         raise HTTPException(status_code=404, detail="post not found")
     # 관리자(can_manage_post)는 남의 글도 손댈 수 있다. 아니면 작성자 본인만
@@ -187,30 +187,30 @@ def delete_post_handler(
 
     post.is_deleted = True
     post.updated_at = datetime.now(timezone.utc)
-    post_repo.update(post)
+    await post_repo.update(post)
     return
 
 @router.post("/page/{id}/restore", status_code=200, response_model=PostDetailSchema)#삭제 복구
-def restore_post_handler(
+async def restore_post_handler(
     id: int,
     current_user: User = Depends(require_permission("can_manage_post")),
     post_repo: PostRepository = Depends(),
 ):
     # 삭제된 글이 대상이므로 include_deleted 로 찾는다
-    post = post_repo.get_post_by_id(id, include_deleted=True)
+    post = await post_repo.get_post_by_id(id, include_deleted=True)
     if post is None:
         raise HTTPException(status_code=404, detail="post not found")
 
     post.is_deleted = False
     post.updated_at = datetime.now(timezone.utc)
-    post = post_repo.update(post)
+    post = await post_repo.update(post)
 
     post.comments = visible_comments(post.comments)
     return post
 
 
 @router.patch("/page/{id}/category", status_code=200, response_model=PostDetailSchema)#분류 이동
-def move_post_category_handler(
+async def move_post_category_handler(
     id: int,
     request: PostCategoryUpdate,
     current_user: User = Depends(require_permission("can_manage_post")),
@@ -218,53 +218,53 @@ def move_post_category_handler(
     category_repo: CategoryRepository = Depends(),
 ):
     # 삭제된 글도 옮길 수 있게 include_deleted 로 찾는다
-    post = post_repo.get_post_by_id(id, include_deleted=True)
+    post = await post_repo.get_post_by_id(id, include_deleted=True)
     if post is None:
         raise HTTPException(status_code=404, detail="post not found")
 
-    if category_repo.get_category_by_id(request.category_id) is None:
+    if await category_repo.get_category_by_id(request.category_id) is None:
         raise HTTPException(status_code=400, detail="category not found")
 
     post.category_id = request.category_id
     post.updated_at = datetime.now(timezone.utc)
-    post = post_repo.update(post)
+    post = await post_repo.update(post)
 
     post.comments = visible_comments(post.comments)
     return post
 
 
 @router.get("/page/{id}/like", status_code=200, response_model=LikeResultSchema)#좋아요 상태
-def get_like_handler(
+async def get_like_handler(
     id: int,
     viewer: User | None = Depends(get_current_user_optional),
     post_repo: PostRepository = Depends(),
     like_repo: LikeRepository = Depends(),
 ):
-    if post_repo.get_post_by_id(id) is None:
+    if await post_repo.get_post_by_id(id) is None:
         raise HTTPException(status_code=404, detail="post not found")
 
     # 비로그인은 누른 적이 없으니 liked=False
-    liked = viewer is not None and like_repo.exists(viewer.id, id)
-    return LikeResultSchema(like_count=like_repo.count_for_post(id), liked=liked)
+    liked = viewer is not None and await like_repo.exists(viewer.id, id)
+    return LikeResultSchema(like_count=await like_repo.count_for_post(id), liked=liked)
 
 
 @router.post("/page/{id}/like", status_code=200, response_model=LikeResultSchema)#좋아요 토글
-def toggle_like_handler(
+async def toggle_like_handler(
     id: int,
     current_user: User = Depends(get_active_user),
     post_repo: PostRepository = Depends(),
     like_repo: LikeRepository = Depends(),
 ):
     # 삭제된 글은 get_post_by_id 가 안 잡아서 404 (삭제 글엔 좋아요 못 누른다)
-    if post_repo.get_post_by_id(id) is None:
+    if await post_repo.get_post_by_id(id) is None:
         raise HTTPException(status_code=404, detail="post not found")
 
     # 이미 눌렀으면 취소, 아니면 좋아요 (버튼 한 번 더 = 취소)
-    if like_repo.exists(current_user.id, id):
-        like_repo.remove(current_user.id, id)
+    if await like_repo.exists(current_user.id, id):
+        await like_repo.remove(current_user.id, id)
         liked = False
     else:
-        like_repo.add(current_user.id, id)
+        await like_repo.add(current_user.id, id)
         liked = True
 
-    return LikeResultSchema(like_count=like_repo.count_for_post(id), liked=liked)
+    return LikeResultSchema(like_count=await like_repo.count_for_post(id), liked=liked)

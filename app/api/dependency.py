@@ -27,7 +27,7 @@ def get_access_token(
     return access_token
 
 
-def get_current_user(
+async def get_current_user(
     access_token: str = Depends(get_access_token),
     auth_service: AuthService = Depends(),
     user_repo: UserRepository = Depends(),
@@ -39,12 +39,12 @@ def get_current_user(
     except jwt.PyJWTError:
         raise HTTPException(status_code=401, detail="invalid token")
 
-    user = user_repo.get_user_by_id(user_id)
+    user = await user_repo.get_user_by_id(user_id)
     if user is None:      # 토큰은 유효한데 계정이 사라진 경우
         raise HTTPException(status_code=401, detail="user not found")
     return user
 
-def get_current_user_optional(
+async def get_current_user_optional(
     access_token: str | None = Cookie(default=None, alias=COOKIE_NAME),
     auth_service: AuthService = Depends(),
     user_repo: UserRepository = Depends(),
@@ -56,10 +56,10 @@ def get_current_user_optional(
         user_id = auth_service.decode_jwt(access_token)
     except jwt.PyJWTError:      # 만료(ExpiredSignatureError 포함)도 여기 잡힌다
         return None
-    return user_repo.get_user_by_id(user_id)
+    return await user_repo.get_user_by_id(user_id)
 
 
-def get_verified_user(
+async def get_verified_user(
     current_user: User = Depends(get_current_user),
 ) -> User:
     # 401(누구인지 모름)과 403(누구인지는 알지만 자격 없음)을 구분한다
@@ -68,7 +68,7 @@ def get_verified_user(
     return current_user
 
 
-def get_active_user(
+async def get_active_user(
     current_user: User = Depends(get_verified_user),
 ) -> User:
     # 인증 → 이메일 확인 다음. 제재된 계정은 새 내용을 만들 수 없다.
