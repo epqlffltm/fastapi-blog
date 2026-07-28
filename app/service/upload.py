@@ -3,12 +3,22 @@
 '''
 2026-07-24
 파일 업로드 서비스 (검증 / 저장)
+
+2026-07-28
+실제 이미지 검증 / 픽셀 제한 / 비동기 파일 저장·삭제
 '''
 
+import asyncio
 import uuid
+import warnings
+from io import BytesIO
 from pathlib import Path
+
 from fastapi import HTTPException, UploadFile
+from PIL import Image, UnidentifiedImageError
+
 from ..database.connection import settings
+
 
 # 확장자는 파일명이 아니라 이 표에서 정한다.
 # 파일명을 믿으면 ../../ 같은 경로 탈출이나 위장 확장자가 들어온다
@@ -19,18 +29,27 @@ ALLOWED_TYPES: dict[str, str] = {
     "image/webp": ".webp",
 }
 
+# 요청의 Content-Type과 실제 이미지 포맷이 일치하는지 확인한다.
+PIL_FORMATS: dict[str, str] = {
+    "image/jpeg": "JPEG",
+    "image/png": "PNG",
+    "image/gif": "GIF",
+    "image/webp": "WEBP",
+}
+
 UPLOAD_DIR = Path(__file__).resolve().parent.parent.parent / "static" / "img"
 
 
 class UploadService:
     async def save(self, file: UploadFile) -> tuple[str, int]:
-        """저장된 파일명과 크기를 돌려준다"""
-        extension = ALLOWED_TYPES.get(file.content_type or "")
+        """검증된 이미지를 저장하고 저장 파일명과 바이트 크기를 반환한다."""
+        content_type = file.content_type or ""
+        extension = ALLOWED_TYPES.get(content_type)
         if extension is None:
             raise HTTPException(status_code=415, detail="unsupported file type")
 
         # 전부 읽어 크기를 재고 나서 쓴다.
-        # 스트리밍으로 쓰면서 검사하면 초과분이 이미 디스크에 남는다
+        # 스트리밍으로 쓰면서 검사하면 초과분이 이미 디스크에 남는다.
         data = await file.read()
         if len(data) > settings.upload_max_bytes:
             limit_mb = settings.upload_max_bytes // (1024 * 1024)
@@ -38,9 +57,74 @@ class UploadService:
         if len(data) == 0:
             raise HTTPException(status_code=400, detail="empty file")
 
-        # 이름은 UUID 로 새로 짓는다 → 충돌·덮어쓰기·경로 탈출이 원천 차단된다
+        self._validate_image(data=data, content_type=content_type)
+
+        # 이름은 UUID로 새로 짓는다 → 충돌·덮어쓰기·경로 탈출이 원천 차단된다.
         filename = f"{uuid.uuid4().hex}{extension}"
-        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-        (UPLOAD_DIR / filename).write_bytes(data)
+        target = UPLOAD_DIR / filename
+        await asyncio.to_thread(self._write_file, target, data)
 
         return filename, len(data)
+
+    async def delete(self, filename: str) -> None:
+        """DB 저장 실패나 이미지 교체 시 이미 저장된 파일을 안전하게 삭제한다."""
+        root = UPLOAD_DIR.resolve()
+        target = (UPLOAD_DIR / filename).resolve()
+        if target.parent != root:
+            raise ValueError("invalid upload filename")
+        await asyncio.to_thread(target.unlink, missing_ok=True)
+
+    @staticmethod
+    def _write_file(target: Path, data: bytes) -> None:
+        """이벤트 루프 밖에서 임시 파일에 쓴 뒤 원자적으로 교체한다."""
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary = target.with_name(f".{target.name}.tmp")
+        try:
+            temporary.write_bytes(data)
+            temporary.replace(target)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    @staticmethod
+    def _validate_image(data: bytes, content_type: str) -> None:
+        """Pillow로 실제 이미지 포맷·무결성·크기를 확인한다."""
+        expected_format = PIL_FORMATS[content_type]
+
+        try:
+            with warnings.catch_warnings():
+                # Pillow가 압축 폭탄 의심 경고를 내면 업로드를 거부한다.
+                warnings.simplefilter("error", Image.DecompressionBombWarning)
+
+                with Image.open(BytesIO(data)) as image:
+                    detected_format = image.format
+                    width, height = image.size
+
+                    if detected_format != expected_format:
+                        raise HTTPException(
+                            status_code=415,
+                            detail="file type does not match content",
+                        )
+
+                    if (
+                        width > settings.upload_max_width
+                        or height > settings.upload_max_height
+                        or width * height > settings.upload_max_pixels
+                    ):
+                        raise HTTPException(
+                            status_code=413,
+                            detail="image dimensions too large",
+                        )
+
+                    # 파일 구조가 손상됐는지 검사한다.
+                    image.verify()
+
+                # verify()는 픽셀을 완전히 디코딩하지 않으므로 다시 열어 첫 프레임을 읽는다.
+                with Image.open(BytesIO(data)) as image:
+                    image.load()
+
+        except HTTPException:
+            raise
+        except (Image.DecompressionBombWarning, Image.DecompressionBombError) as exc:
+            raise HTTPException(status_code=413, detail="image dimensions too large") from exc
+        except (UnidentifiedImageError, OSError, SyntaxError, ValueError) as exc:
+            raise HTTPException(status_code=415, detail="invalid image file") from exc

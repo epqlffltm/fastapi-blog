@@ -12,6 +12,9 @@ Settings에 필드 추가
 
 2026-07-27
 async 전환 (asyncpg) / echo 를 설정으로
+
+2026-07-28
+업로드 이미지 크기 제한 설정 추가
 '''
 
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
@@ -34,6 +37,9 @@ class Settings(BaseSettings):
     cookie_secure: bool = False    # 추가: 배포(HTTPS)에서 true
     cookie_max_age: int = 86400
     upload_max_bytes: int = 5 * 1024 * 1024
+    upload_max_width: int = 10_000
+    upload_max_height: int = 10_000
+    upload_max_pixels: int = 25_000_000
     db_echo: bool = False    # 배포에선 False, 로컬 디버깅 때만 True
 
 

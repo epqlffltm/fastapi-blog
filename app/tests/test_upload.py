@@ -3,10 +3,36 @@
 '''
 2026-07-24
 파일 업로드 API / 마크다운 추출 테스트
+
+2026-07-28
+실제 이미지 검증 / 크기 제한 / DB 실패 시 파일 정리 테스트
 '''
 
+from io import BytesIO
+
+import pytest
+from fastapi import HTTPException, UploadFile
+from PIL import Image
+from starlette.datastructures import Headers
+
+from app.database.connection import settings
+from app.service import upload as upload_module
 from app.service.markdown import extract_first_image
-from app.service.upload import ALLOWED_TYPES
+from app.service.upload import ALLOWED_TYPES, UploadService
+
+
+def _image_bytes(format: str = "PNG", size: tuple[int, int] = (2, 2)) -> bytes:
+    buffer = BytesIO()
+    Image.new("RGB", size).save(buffer, format=format)
+    return buffer.getvalue()
+
+
+def _upload_file(data: bytes, content_type: str, filename: str) -> UploadFile:
+    return UploadFile(
+        file=BytesIO(data),
+        filename=filename,
+        headers=Headers({"content-type": content_type}),
+    )
 
 
 # ---------- 업로드 ----------
@@ -36,6 +62,22 @@ def test_upload_records_original_name(admin_client, mock_upload_service, mock_up
     assert saved.filename == "abc123.png"
     assert saved.original_name == "사진.png"
     assert saved.user_id == 1
+
+
+def test_upload_deletes_file_when_db_save_fails(
+    admin_client, mock_upload_service, mock_upload_repo
+):
+    """디스크 저장 후 DB 기록이 실패하면 고아 파일을 삭제한다."""
+    mock_upload_service.save.return_value = ("abc123.png", 1234)
+    mock_upload_repo.save.side_effect = RuntimeError("db failed")
+
+    with pytest.raises(RuntimeError, match="db failed"):
+        admin_client.post(
+            "/upload",
+            files={"file": ("사진.png", b"fake-bytes", "image/png")},
+        )
+
+    mock_upload_service.delete.assert_awaited_once_with("abc123.png")
 
 
 def test_upload_without_permission(auth_client, mock_upload_service, mock_upload_repo):
@@ -73,6 +115,70 @@ def test_upload_when_suspended(suspended_client, mock_upload_service, mock_uploa
     assert response.status_code == 403
     assert response.json()["detail"] == "suspended"
     mock_upload_repo.save.assert_not_called()
+
+
+# ---------- 업로드 서비스 ----------
+
+@pytest.mark.asyncio
+async def test_upload_service_saves_valid_image(tmp_path, monkeypatch):
+    monkeypatch.setattr(upload_module, "UPLOAD_DIR", tmp_path)
+    data = _image_bytes()
+
+    filename, size = await UploadService().save(
+        _upload_file(data, "image/png", "image.png")
+    )
+
+    assert filename.endswith(".png")
+    assert size == len(data)
+    assert (tmp_path / filename).read_bytes() == data
+
+
+@pytest.mark.asyncio
+async def test_upload_service_rejects_fake_image():
+    with pytest.raises(HTTPException) as exc_info:
+        await UploadService().save(
+            _upload_file(b"not-an-image", "image/png", "fake.png")
+        )
+
+    assert exc_info.value.status_code == 415
+    assert exc_info.value.detail == "invalid image file"
+
+
+@pytest.mark.asyncio
+async def test_upload_service_rejects_content_type_mismatch():
+    jpeg = _image_bytes(format="JPEG")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await UploadService().save(
+            _upload_file(jpeg, "image/png", "spoofed.png")
+        )
+
+    assert exc_info.value.status_code == 415
+    assert exc_info.value.detail == "file type does not match content"
+
+
+@pytest.mark.asyncio
+async def test_upload_service_rejects_large_dimensions(monkeypatch):
+    monkeypatch.setattr(settings, "upload_max_width", 1)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await UploadService().save(
+            _upload_file(_image_bytes(size=(2, 2)), "image/png", "large.png")
+        )
+
+    assert exc_info.value.status_code == 413
+    assert exc_info.value.detail == "image dimensions too large"
+
+
+@pytest.mark.asyncio
+async def test_upload_service_delete(tmp_path, monkeypatch):
+    monkeypatch.setattr(upload_module, "UPLOAD_DIR", tmp_path)
+    target = tmp_path / "abc.png"
+    target.write_bytes(b"x")
+
+    await UploadService().delete("abc.png")
+
+    assert not target.exists()
 
 
 # ---------- 허용 형식 ----------
