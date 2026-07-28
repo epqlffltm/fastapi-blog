@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>내 정보 · blog</title>
+    <title>profile · blog</title>
     <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
@@ -16,83 +16,103 @@
 
     <main class="container">
         <section id="profile" hidden>
-            <h1>설정</h1>
+            <h1>profile</h1>
             <p class="profile-actions">
                 <a class="ghost-btn" id="view-profile-link" href="/">내 프로필 보기</a>
             </p>
 
-            <div class="avatar-box">
-                <img id="avatar-preview" class="avatar-preview" alt="프로필 이미지">
-                <div>
-                    <input type="file" id="avatar-input" accept="image/*" hidden>
-                    <button type="button" class="ghost-btn" id="avatar-btn">이미지 변경</button>
-                    <p class="error" id="avatar-error"></p>
-                </div>
-            </div>
+            <div class="profile-layout">
+                <!-- 사이드바 -->
+                <aside class="profile-sidebar">
+                    <button type="button" class="profile-nav-btn active" data-section="intro">자기 소개</button>
+                    <button type="button" class="profile-nav-btn" data-section="posts">작성 내역</button>
+                    <button type="button" class="profile-nav-btn" data-section="password">비번 변경</button>
+                </aside>
 
-            <!-- 작성한 글 / 댓글 (상단) -->
-            <div class="profile-columns">
-                <div class="profile-box">
-                    <h2>작성한 글</h2>
-                    <ul class="post-list" id="my-posts"></ul>
-                    <p class="empty" id="my-posts-empty" hidden>아직 작성한 글이 없습니다.</p>
-                    <nav class="pagination" id="my-posts-pagination" aria-label="글 페이지"></nav>
-                </div>
+                <!-- 콘텐츠 영역 -->
+                <div class="profile-content">
 
-                <div class="profile-box">
-                    <h2>작성한 댓글</h2>
-                    <ul class="comment-list" id="my-comments"></ul>
-                    <p class="empty" id="my-comments-empty" hidden>아직 작성한 댓글이 없습니다.</p>
-                    <nav class="pagination" id="my-comments-pagination" aria-label="댓글 페이지"></nav>
-                </div>
-            </div>
+                    <!-- 1. 자기 소개 (기본 표시) -->
+                    <div class="profile-section" id="section-intro">
+                        <div class="avatar-box">
+                            <img id="avatar-preview" class="avatar-preview" alt="프로필 이미지">
+                            <div>
+                                <input type="file" id="avatar-input" accept="image/*" hidden>
+                                <button type="button" class="ghost-btn" id="avatar-btn">이미지 변경</button>
+                                <p class="error" id="avatar-error"></p>
+                            </div>
+                        </div>
 
-            <!-- 기본 정보 수정 -->
-            <form id="profile-form" style="margin-top: 32px;">
-                <div class="field">
-                    <label for="email">이메일</label>
-                    <input type="email" id="email" disabled>
-                </div>
-                <div class="field">
-                    <label for="nickname">닉네임</label>
-                    <input type="text" id="nickname" required minlength="2" maxlength="20"
-                        autocomplete="nickname">
-                </div>
-                <div class="field">
-                    <label for="bio">소개</label>
-                    <textarea id="bio" maxlength="500" rows="4"
-                        placeholder="자기소개를 입력하세요 (선택)"></textarea>
-                </div>
-                <p class="error" id="profile-error"></p>
-                <p class="notice" id="profile-done" hidden>저장되었습니다.</p>
-                <button type="submit" class="primary" id="profile-submit">저장</button>
-            </form>
-
-            <h2>비밀번호 변경</h2>
-            <form id="password-form">
-                <div class="field">
-                    <label for="current-password">현재 비밀번호</label>
-                    <input type="password" id="current-password" required
-                        autocomplete="current-password">
-                </div>
-                <div class="field">
-                    <label for="new-password">새 비밀번호 (8자 이상)</label>
-                    <input type="password" id="new-password" required minlength="8" maxlength="72"
-                        autocomplete="new-password">
-                </div>
-                <div class="field">
-                    <label for="otp">이메일 인증 코드</label>
-                    <div class="otp-row">
-                        <input type="text" id="otp" inputmode="numeric" maxlength="6"
-                            placeholder="6자리 숫자" autocomplete="one-time-code">
-                        <button type="button" class="ghost-btn" id="otp-btn">코드 받기</button>
+                        <form id="profile-form">
+                            <div class="field">
+                                <label for="email">이메일</label>
+                                <input type="email" id="email" disabled>
+                            </div>
+                            <div class="field">
+                                <label for="nickname">닉네임</label>
+                                <input type="text" id="nickname" required minlength="2" maxlength="20"
+                                    autocomplete="nickname">
+                            </div>
+                            <div class="field">
+                                <label for="bio">소개</label>
+                                <textarea id="bio" maxlength="500" rows="4"
+                                    placeholder="자기소개를 입력하세요 (선택)"></textarea>
+                            </div>
+                            <p class="error" id="profile-error"></p>
+                            <p class="notice" id="profile-done" hidden>저장되었습니다.</p>
+                            <button type="submit" class="primary" id="profile-submit">저장</button>
+                        </form>
                     </div>
-                    <p class="hint" id="otp-hint" hidden>가입한 이메일로 코드를 보냈습니다. (3분 유효)</p>
+
+                    <!-- 2. 작성 내역 (글 + 댓글) -->
+                    <div class="profile-section" id="section-posts" hidden>
+                        <div class="profile-columns">
+                            <div class="profile-box">
+                                <h2>작성한 글</h2>
+                                <ul class="post-list" id="my-posts"></ul>
+                                <p class="empty" id="my-posts-empty" hidden>아직 작성한 글이 없습니다.</p>
+                                <nav class="pagination" id="my-posts-pagination" aria-label="글 페이지"></nav>
+                            </div>
+
+                            <div class="profile-box">
+                                <h2>작성한 댓글</h2>
+                                <ul class="comment-list" id="my-comments"></ul>
+                                <p class="empty" id="my-comments-empty" hidden>아직 작성한 댓글이 없습니다.</p>
+                                <nav class="pagination" id="my-comments-pagination" aria-label="댓글 페이지"></nav>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 3. 비번 변경 -->
+                    <div class="profile-section" id="section-password" hidden>
+                        <form id="password-form">
+                            <div class="field">
+                                <label for="current-password">현재 비밀번호</label>
+                                <input type="password" id="current-password" required
+                                    autocomplete="current-password">
+                            </div>
+                            <div class="field">
+                                <label for="new-password">새 비밀번호 (8자 이상)</label>
+                                <input type="password" id="new-password" required minlength="8" maxlength="72"
+                                    autocomplete="new-password">
+                            </div>
+                            <div class="field">
+                                <label for="otp">이메일 인증 코드</label>
+                                <div class="otp-row">
+                                    <input type="text" id="otp" inputmode="numeric" maxlength="6"
+                                        placeholder="6자리 숫자" autocomplete="one-time-code">
+                                    <button type="button" class="ghost-btn" id="otp-btn">코드 받기</button>
+                                </div>
+                                <p class="hint" id="otp-hint" hidden>가입한 이메일로 코드를 보냈습니다. (3분 유효)</p>
+                            </div>
+                            <p class="error" id="password-error"></p>
+                            <p class="notice" id="password-done" hidden>비밀번호가 변경되었습니다.</p>
+                            <button type="submit" class="primary" id="password-submit">비밀번호 변경</button>
+                        </form>
+                    </div>
+
                 </div>
-                <p class="error" id="password-error"></p>
-                <p class="notice" id="password-done" hidden>비밀번호가 변경되었습니다.</p>
-                <button type="submit" class="primary" id="password-submit">비밀번호 변경</button>
-            </form>
+            </div>
         </section>
 
         <p class="empty" id="status">불러오는 중…</p>

@@ -1,6 +1,6 @@
-// 2026-07-28 설정 페이지
-// 작성한 글/댓글 상단 + 페이지네이션
-// 내 프로필 보기 → /user/{내id}
+// 2026-07-28 profile 페이지
+// 사이드바: 자기 소개 / 쓴 글 / 비번 변경
+// 기본 진입 시 자기 소개 활성
 
 const PAGE_SIZE = 10;
 
@@ -37,7 +37,46 @@ const commentsEl = document.getElementById("my-comments");
 const commentsEmptyEl = document.getElementById("my-comments-empty");
 const commentsPaginationEl = document.getElementById("my-comments-pagination");
 
+const navButtons = document.querySelectorAll(".profile-nav-btn");
+const sections = {
+    intro: document.getElementById("section-intro"),
+    posts: document.getElementById("section-posts"),
+    password: document.getElementById("section-password"),
+};
+
 let myId = null;
+let postsLoaded = false;
+let commentsLoaded = false;
+
+function switchSection(name) {
+    // 사이드바 버튼 active
+    navButtons.forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.section === name);
+    });
+
+    // 섹션 표시/숨김
+    Object.entries(sections).forEach(([key, el]) => {
+        if (el) el.hidden = key !== name;
+    });
+
+    // 쓴 글 섹션 처음 열 때 로드
+    if (name === "posts") {
+        if (!postsLoaded) {
+            loadPosts(1);
+            postsLoaded = true;
+        }
+        if (!commentsLoaded) {
+            loadComments(1);
+            commentsLoaded = true;
+        }
+    }
+}
+
+navButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+        switchSection(btn.dataset.section);
+    });
+});
 
 async function init() {
     const user = await renderHeader();
@@ -60,9 +99,8 @@ async function init() {
     statusEl.hidden = true;
     section.hidden = false;
 
-    // 반드시 글/댓글 로드
-    await loadPosts(1);
-    await loadComments(1);
+    // 기본: 자기 소개
+    switchSection("intro");
 }
 
 function createPostItem(post) {
@@ -156,7 +194,6 @@ async function loadPosts(page = 1) {
         const data = await api.get(
             `/pages?author=${myId}&order=desc&page=${page}&size=${PAGE_SIZE}`
         );
-        console.log("posts response:", data);
 
         if (!data.posts || data.posts.length === 0) {
             postsEmptyEl.hidden = false;
@@ -184,7 +221,6 @@ async function loadComments(page = 1) {
         const data = await api.get(
             `/user/${myId}/comments?page=${page}&size=${PAGE_SIZE}`
         );
-        console.log("comments response:", data);
 
         if (!data.comments || data.comments.length === 0) {
             commentsEmptyEl.hidden = false;

@@ -1011,3 +1011,67 @@ select:focus { border-color: var(--accent); }
         gap: 18px;
     }
 }
+
+/* ── profile 사이드바 레이아웃 ─────────────────────────── */
+.profile-layout {
+    display: grid !important;
+    grid-template-columns: 160px 1fr !important;
+    gap: 28px;
+    align-items: start;
+    margin-top: 16px;
+}
+
+.profile-sidebar {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 4px;
+    position: sticky;
+    top: 20px;
+}
+
+.profile-nav-btn {
+    display: block !important;
+    width: 100% !important;
+    padding: 10px 12px;
+    text-align: left !important;
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    color: var(--text-dim, #aaa);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+}
+
+.profile-nav-btn:hover {
+    background: var(--bg-raised, #2a2a2a);
+    color: var(--text, #eee);
+}
+
+.profile-nav-btn.active {
+    background: var(--accent-wash, rgba(100, 140, 255, 0.15));
+    color: var(--text, #eee);
+    box-shadow: inset 2px 0 0 var(--accent, #6af);
+}
+
+.profile-content {
+    min-width: 0;
+}
+
+@media (max-width: 700px) {
+    .profile-layout {
+        grid-template-columns: 1fr !important;
+        gap: 16px;
+    }
+    .profile-sidebar {
+        position: static;
+        flex-direction: row !important;
+        flex-wrap: wrap;
+    }
+    .profile-nav-btn {
+        width: auto !important;
+        flex: 1 1 auto;
+        text-align: center !important;
+    }
+}
