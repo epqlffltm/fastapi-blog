@@ -940,3 +940,8 @@ select:focus { border-color: var(--accent); }
     white-space: pre-wrap;
     word-break: break-word;
 }
+
+/* 프로필 화면의 이동 버튼 줄 (설정 / 내 프로필 보기) */
+.profile-actions {
+    margin: 10px 0 0;
+}

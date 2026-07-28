@@ -55,10 +55,12 @@ async function renderHeader() {
             nav.append(state);
         }
 
-        // 닉네임을 누르면 내 정보 페이지로 간다
+        // 닉네임을 누르면 내 프로필로 간다.
+        // 남의 프로필과 같은 화면이라 "남에게 어떻게 보이는지"를 그대로 확인할 수 있다.
+        // 설정(닉네임·소개·아바타·비밀번호)은 그 화면의 설정 버튼으로 들어간다
         const name = document.createElement("a");
         name.className = "who";
-        name.href = "/profile";
+        name.href = `/user/${user.id}`;
         // avatar 가 있으면 닉네임 앞에 작은 원형 이미지
         if (user.avatar_url) {
             const av = document.createElement("img");
