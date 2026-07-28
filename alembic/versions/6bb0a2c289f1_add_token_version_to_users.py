@@ -11,6 +11,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
+# revision identifiers, used by Alembic.
 revision: str = "6bb0a2c289f1"
 down_revision: Union[str, Sequence[str], None] = "8678755e0daa"
 branch_labels: Union[str, Sequence[str], None] = None
@@ -25,10 +26,15 @@ def upgrade() -> None:
             "token_version",
             sa.Integer(),
             nullable=False,
-            server_default="0",
+            server_default=sa.text("0"),
         ),
     )
-    op.alter_column("users", "token_version", server_default=None)
+    op.alter_column(
+        "users",
+        "token_version",
+        existing_type=sa.Integer(),
+        server_default=None,
+    )
 
 
 def downgrade() -> None:
