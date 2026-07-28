@@ -7,13 +7,17 @@
 2026-07-24
 httpOnly 쿠키에서 토큰을 읽도록 변경
 등급 확인 → 권한 체크박스 / 제재(정지·강퇴)로 전환
+
+2026-07-28
+JWT token_version과 DB 값을 비교해 기존 세션 무효화
 '''
 
 import jwt
 from fastapi import Cookie, Depends, HTTPException
-from ..database.orm import User, PERMISSION_NAMES
+
+from ..database.orm import PERMISSION_NAMES, User
 from ..database.repository import UserRepository
-from ..service.auth import AuthService
+from ..service.auth import AuthService, JWTClaims
 
 COOKIE_NAME = "access_token"
 
@@ -27,22 +31,30 @@ def get_access_token(
     return access_token
 
 
+def _session_version_matches(claims: JWTClaims, user: User) -> bool:
+    """비밀번호 변경 뒤 증가한 DB 버전과 토큰 발급 당시 버전을 비교한다."""
+    return claims.token_version == int(user.token_version or 0)
+
+
 async def get_current_user(
     access_token: str = Depends(get_access_token),
     auth_service: AuthService = Depends(),
     user_repo: UserRepository = Depends(),
 ) -> User:
     try:
-        user_id = auth_service.decode_jwt(access_token)
+        claims = auth_service.decode_jwt_claims(access_token)
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="token expired")
     except jwt.PyJWTError:
         raise HTTPException(status_code=401, detail="invalid token")
 
-    user = await user_repo.get_user_by_id(user_id)
+    user = await user_repo.get_user_by_id(claims.user_id)
     if user is None:      # 토큰은 유효한데 계정이 사라진 경우
         raise HTTPException(status_code=401, detail="user not found")
+    if not _session_version_matches(claims, user):
+        raise HTTPException(status_code=401, detail="session expired")
     return user
+
 
 async def get_current_user_optional(
     access_token: str | None = Cookie(default=None, alias=COOKIE_NAME),
@@ -53,10 +65,14 @@ async def get_current_user_optional(
     if access_token is None:
         return None
     try:
-        user_id = auth_service.decode_jwt(access_token)
+        claims = auth_service.decode_jwt_claims(access_token)
     except jwt.PyJWTError:      # 만료(ExpiredSignatureError 포함)도 여기 잡힌다
         return None
-    return await user_repo.get_user_by_id(user_id)
+
+    user = await user_repo.get_user_by_id(claims.user_id)
+    if user is None or not _session_version_matches(claims, user):
+        return None
+    return user
 
 
 async def get_verified_user(

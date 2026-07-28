@@ -1,8 +1,9 @@
 """인증·설정·Redis 장애 격리 회귀 테스트."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock
 
+import jwt
 import pytest
 from pydantic import ValidationError
 
@@ -14,6 +15,7 @@ from app.schema.request import (
     SignUpRequest,
 )
 from app.service.auth import AuthService
+from app.service.otp import OTPService, OTPVerifyResult
 from app.service.password import BCRYPT_MAX_PASSWORD_BYTES
 
 
@@ -22,6 +24,7 @@ def _make_user() -> User:
         id=1,
         email="test@example.com",
         password="$2b$12$fakehashedpassword",
+        token_version=0,
         nickname="tester",
         is_verified=True,
         can_comment=True,
@@ -244,3 +247,356 @@ def test_redis_failure_does_not_block_post_read(
     assert response.json()["id"] == 1
     assert response.json()["view_count"] == 5
     mock_post_repo.increment_view_count.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("raw_result", "expected"),
+    [
+        (1, OTPVerifyResult.VERIFIED),
+        (0, OTPVerifyResult.INVALID),
+        (-1, OTPVerifyResult.EXPIRED_OR_MISSING),
+        (-2, OTPVerifyResult.TOO_MANY_ATTEMPTS),
+    ],
+)
+@pytest.mark.asyncio
+async def test_otp_verify_and_consume_maps_atomic_script_result(
+    mock_redis,
+    raw_result,
+    expected,
+):
+    mock_redis.eval.return_value = raw_result
+    service = OTPService(redis=mock_redis)
+
+    result = await service.verify_and_consume(
+        "Test@Example.com",
+        123456,
+        purpose="reset",
+    )
+
+    assert result is expected
+    script, key_count, otp_key, attempts_key, provided, max_attempts, ttl = (
+        mock_redis.eval.await_args.args
+    )
+    assert "OTP_VERIFY_AND_CONSUME" in script
+    assert key_count == 2
+    assert otp_key == "otp:reset:test@example.com"
+    assert attempts_key == "otp:verify-attempts:reset:test@example.com"
+    assert provided == "123456"
+    assert max_attempts == service.max_verify_attempts
+    assert ttl == service.ttl
+
+
+@pytest.mark.asyncio
+async def test_saving_new_otp_resets_previous_verification_attempts(mock_redis):
+    mock_redis.eval.return_value = 1
+    service = OTPService(redis=mock_redis)
+
+    await service.save_otp("Test@Example.com", 654321, purpose="signup")
+
+    script, key_count, otp_key, attempts_key, otp, ttl = mock_redis.eval.await_args.args
+    assert "OTP_SAVE_AND_RESET_ATTEMPTS" in script
+    assert key_count == 2
+    assert otp_key == "otp:signup:test@example.com"
+    assert attempts_key == "otp:verify-attempts:signup:test@example.com"
+    assert otp == "654321"
+    assert ttl == service.ttl
+
+
+def test_signup_otp_attempt_limit_returns_429(
+    auth_client,
+    current_user,
+    mock_redis,
+    mock_user_repo,
+):
+    current_user.is_verified = False
+    mock_redis.eval.return_value = OTPVerifyResult.TOO_MANY_ATTEMPTS.value
+
+    response = auth_client.post("/user/email/otp/verify", json={"otp": 123456})
+
+    assert response.status_code == 429
+    assert response.json()["detail"] == "too many otp attempts"
+    assert current_user.is_verified is False
+    mock_user_repo.update_user.assert_not_called()
+
+
+def test_signup_invalid_otp_returns_400(
+    auth_client,
+    current_user,
+    mock_redis,
+    mock_user_repo,
+):
+    current_user.is_verified = False
+    mock_redis.eval.return_value = OTPVerifyResult.INVALID.value
+
+    response = auth_client.post("/user/email/otp/verify", json={"otp": 123456})
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid otp"
+    mock_user_repo.update_user.assert_not_called()
+
+
+def test_password_change_increments_token_version_and_clears_cookie(
+    auth_client,
+    current_user,
+    mock_user_repo,
+    mock_redis,
+):
+    service = AuthService()
+    current_user.password = service.hash_password("oldpass123")
+    current_user.token_version = 3
+    mock_redis.eval.return_value = OTPVerifyResult.VERIFIED.value
+
+    response = auth_client.patch(
+        "/user/me/password",
+        json={
+            "current_password": "oldpass123",
+            "new_password": "newpass456",
+            "otp": 123456,
+        },
+    )
+
+    assert response.status_code == 200
+    assert current_user.token_version == 4
+    assert service.verify_password("newpass456", current_user.password)
+    set_cookie = response.headers["set-cookie"].lower()
+    assert "access_token=" in set_cookie
+    assert "max-age=0" in set_cookie or "expires=" in set_cookie
+    mock_user_repo.update_user.assert_awaited_once()
+
+
+def test_password_reset_increments_token_version(
+    client,
+    mock_user_repo,
+    mock_redis,
+):
+    user = _make_user()
+    user.token_version = 8
+    mock_user_repo.get_user_by_email.return_value = user
+    mock_redis.eval.return_value = OTPVerifyResult.VERIFIED.value
+
+    response = client.post(
+        "/user/password/reset/verify",
+        json={
+            "email": user.email,
+            "otp": 123456,
+            "new_password": "newpassword123",
+        },
+    )
+
+    assert response.status_code == 200
+    assert user.token_version == 9
+    mock_user_repo.update_user.assert_awaited_once()
+
+
+def test_stale_token_version_is_rejected(client, mock_user_repo):
+    user = _make_user()
+    user.token_version = 2
+    mock_user_repo.get_user_by_id.return_value = user
+    client.cookies.set(
+        "access_token",
+        AuthService().create_jwt(user.id, token_version=1),
+    )
+
+    response = client.get("/user/me")
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "session expired"
+
+
+def test_matching_token_version_is_accepted(client, mock_user_repo):
+    user = _make_user()
+    user.token_version = 2
+    mock_user_repo.get_user_by_id.return_value = user
+    client.cookies.set(
+        "access_token",
+        AuthService().create_jwt(user.id, token_version=2),
+    )
+
+    response = client.get("/user/me")
+
+    assert response.status_code == 200
+    assert response.json()["id"] == user.id
+
+
+def test_legacy_token_without_version_is_version_zero():
+    token = jwt.encode(
+        {
+            "sub": "1",
+            "exp": datetime.now(timezone.utc) + timedelta(minutes=1),
+        },
+        AuthService.secret_key,
+        algorithm=AuthService.jwt_algorithm,
+    )
+
+    claims = AuthService().decode_jwt_claims(token)
+
+    assert claims.user_id == 1
+    assert claims.token_version == 0
+
+
+def test_login_issues_current_token_version(
+    client,
+    mock_user_repo,
+    mock_rate_limit,
+):
+    service = AuthService()
+    user = _make_user()
+    user.password = service.hash_password("password123")
+    user.token_version = 7
+    mock_user_repo.get_user_by_email.return_value = user
+
+    response = client.post(
+        "/user/log-in",
+        json={"email": user.email, "password": "password123"},
+    )
+
+    assert response.status_code == 200
+    token = response.cookies.get("access_token")
+    assert token is not None
+    assert service.decode_jwt_claims(token).token_version == 7
+
+
+def _request(peer: str, forwarded_for: str | None = None):
+    from starlette.requests import Request
+
+    headers = []
+    if forwarded_for is not None:
+        headers.append((b"x-forwarded-for", forwarded_for.encode("ascii")))
+    return Request(
+        {
+            "type": "http",
+            "http_version": "1.1",
+            "method": "GET",
+            "scheme": "http",
+            "path": "/",
+            "raw_path": b"/",
+            "query_string": b"",
+            "headers": headers,
+            "client": (peer, 12345),
+            "server": ("testserver", 80),
+        }
+    )
+
+
+def test_untrusted_peer_cannot_spoof_forwarded_ip():
+    from app.service.client_ip import get_client_ip
+
+    request = _request("203.0.113.10", "198.51.100.20")
+
+    assert get_client_ip(request, "10.0.0.0/8") == "203.0.113.10"
+
+
+def test_trusted_proxy_chain_returns_first_untrusted_hop():
+    from app.service.client_ip import get_client_ip
+
+    request = _request(
+        "10.0.0.3",
+        "198.51.100.20, 10.0.0.1, 10.0.0.2",
+    )
+
+    assert get_client_ip(request, "10.0.0.0/8") == "198.51.100.20"
+
+
+def test_invalid_forwarded_header_falls_back_to_peer():
+    from app.service.client_ip import get_client_ip
+
+    request = _request("10.0.0.3", "not-an-ip")
+
+    assert get_client_ip(request, "10.0.0.0/8") == "10.0.0.3"
+
+
+def test_invalid_trusted_proxy_cidr_is_rejected():
+    with pytest.raises(ValidationError, match="invalid trusted proxy CIDR"):
+        _settings(trusted_proxy_cidrs="10.0.0.0/8,broken")
+
+
+def test_managed_avatar_filename_accepts_only_generated_local_urls():
+    from app.service.upload import UploadService
+
+    filename = "a" * 32 + ".png"
+    assert UploadService.managed_filename_from_url(f"/img/{filename}") == filename
+    assert UploadService.managed_filename_from_url("https://example.com/avatar.png") is None
+    assert UploadService.managed_filename_from_url("/img/../../secret") is None
+    assert UploadService.managed_filename_from_url("/img/custom.png") is None
+    assert UploadService.managed_filename_from_url(f"/img/{filename}?v=1") is None
+
+
+@pytest.mark.asyncio
+async def test_avatar_change_deletes_previous_file_after_db_success(current_user):
+    from unittest.mock import AsyncMock
+
+    from app.api.user import upload_avatar_handler
+
+    old_filename = "a" * 32 + ".png"
+    new_filename = "b" * 32 + ".webp"
+    current_user.avatar_url = f"/img/{old_filename}"
+
+    user_repo = AsyncMock()
+    user_repo.update_user.return_value = current_user
+    from app.service.upload import UploadService
+
+    upload_service = AsyncMock(spec=UploadService)
+    upload_service.save.return_value = (new_filename, 123)
+    upload_service.managed_filename_from_url.return_value = old_filename
+
+    result = await upload_avatar_handler(
+        file=Mock(),
+        current_user=current_user,
+        user_repo=user_repo,
+        upload_service=upload_service,
+    )
+
+    assert result is current_user
+    assert current_user.avatar_url == f"/img/{new_filename}"
+    upload_service.delete.assert_awaited_once_with(old_filename)
+
+
+@pytest.mark.asyncio
+async def test_avatar_change_failure_deletes_new_file_and_restores_url(current_user):
+    from unittest.mock import AsyncMock
+
+    from app.api.user import upload_avatar_handler
+
+    old_filename = "a" * 32 + ".png"
+    new_filename = "b" * 32 + ".webp"
+    old_url = f"/img/{old_filename}"
+    current_user.avatar_url = old_url
+
+    user_repo = AsyncMock()
+    user_repo.update_user.side_effect = RuntimeError("database down")
+    from app.service.upload import UploadService
+
+    upload_service = AsyncMock(spec=UploadService)
+    upload_service.save.return_value = (new_filename, 123)
+    upload_service.managed_filename_from_url.return_value = old_filename
+
+    with pytest.raises(RuntimeError, match="database down"):
+        await upload_avatar_handler(
+            file=Mock(),
+            current_user=current_user,
+            user_repo=user_repo,
+            upload_service=upload_service,
+        )
+
+    assert current_user.avatar_url == old_url
+    upload_service.delete.assert_awaited_once_with(new_filename)
+
+
+def test_public_profile_comments_use_deleted_post_safe_repository(
+    client,
+    mock_user_repo,
+    mock_profile_comment_repo,
+):
+    user = _make_user()
+    mock_user_repo.get_user_by_id.return_value = user
+    mock_profile_comment_repo.get_comments_by_user.return_value = ([], 0)
+
+    response = client.get(f"/user/{user.id}/comments")
+
+    assert response.status_code == 200
+    mock_profile_comment_repo.get_comments_by_user.assert_awaited_once_with(
+        user_id=user.id,
+        page=1,
+        size=20,
+        include_deleted=False,
+    )

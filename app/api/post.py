@@ -28,6 +28,7 @@ repository 패턴 적용
 게시글 수정 요청 스키마 검증
 게시글 목록 페이지네이션 / 제목·본문·작성자 검색 / N+1 제거
 Redis 장애 시 조회수만 포기하고 글 조회는 계속하도록 변경
+신뢰 프록시 설정을 거친 실제 클라이언트 IP 사용
 '''
 
 import logging
@@ -41,6 +42,7 @@ from ..schema.response import (
     ListPostSchema, PostListItemSchema, PostDetailSchema,
     UserBriefSchema, CategorySchema, LikeResultSchema,
 )
+from ..service.client_ip import get_client_ip
 from ..service.comment import visible_comments
 from ..service.markdown import extract_first_image
 from .dependency import (
@@ -135,7 +137,7 @@ async def get_page_handler(
     # 조회수: 삭제된 글(관리자만 봄)은 세지 않는다.
     # Redis 장애가 글 조회까지 막아서는 안 되므로 조회수만 포기한다.
     if not post.is_deleted:
-        ip = request.client.host if request.client else "unknown"
+        ip = get_client_ip(request)
         try:
             first_view = await redis.set(
                 f"viewed:{post.id}:{ip}", "1", nx=True, ex=VIEW_DEDUP_TTL_SECONDS

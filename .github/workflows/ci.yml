@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  quality-and-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: blog_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d blog_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/blog_test
+      TEST_DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/blog_test
+      TEST_REDIS_URL: redis://127.0.0.1:6379/15
+      JWT_SECRET_KEY: ci-only-secret-key-with-at-least-32-bytes
+      JWT_ALGORITHM: HS256
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: "6379"
+      COOKIE_SECURE: "false"
+      TRUSTED_PROXY_CIDRS: ""
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+
+      - name: Install Python
+        run: uv python install 3.13
+
+      - name: Sync locked dependencies
+        run: uv sync --frozen --all-groups
+
+      - name: Python syntax check
+        run: uv run python -m compileall -q app alembic
+
+      - name: Ruff correctness check
+        run: uvx ruff check --select E9,F63,F7,F82 app alembic
+
+      - name: Migration round-trip
+        run: |
+          uv run alembic upgrade head
+          uv run alembic downgrade base
+          uv run alembic upgrade head
+
+      - name: Unit tests
+        run: uv run pytest --strict-markers -m "not integration"
+
+      - name: PostgreSQL and Redis integration tests
+        run: uv run pytest --strict-markers -m integration

@@ -12,8 +12,13 @@ httpOnly 쿠키 로그인 / 로그아웃
 2026-07-28
 프로필 댓글 목록 API 추가
 bcrypt 해싱·검증을 thread pool로 이동
+OTP 원자 검증·소비 / 비밀번호 변경 시 기존 세션 무효화
+아바타 교체 실패·성공 시 고아 파일 정리 / 신뢰 프록시 IP 적용
+삭제 글의 댓글이 공개 프로필에 노출되지 않도록 조회 분리
 '''
 
+import logging
+from contextlib import suppress
 from datetime import datetime, timedelta, timezone
 
 from fastapi import (
@@ -22,7 +27,8 @@ from fastapi import (
 from sqlalchemy.exc import IntegrityError
 from ..database.connection import settings
 from ..database.orm import User
-from ..database.repository import UserRepository, CommentRepository
+from ..database.profile_repository import ProfileCommentRepository
+from ..database.repository import UserRepository
 from ..schema.request import (
     SignUpRequest, LogInRequest, VerifyOTPRequest,
     ResetPasswordRequest, ResetPasswordVerifyRequest,
@@ -34,9 +40,10 @@ from ..schema.response import (
     ListUserCommentSchema, UserCommentItemSchema, PostBriefSchema, UserBriefSchema,
 )
 from ..service.auth import AuthService
+from ..service.client_ip import get_client_ip
 from ..service.upload import UploadService
 from ..service.email import EmailService
-from ..service.otp import OTPService
+from ..service.otp import OTPService, OTPVerifyResult
 from ..service.ratelimit import LoginRateLimitService
 from .dependency import (
     get_current_user, get_active_user, require_permission,
@@ -44,6 +51,27 @@ from .dependency import (
 )
 
 router = APIRouter(prefix="/user", tags=["user"])
+logger = logging.getLogger(__name__)
+
+
+def _delete_access_cookie(response: Response) -> None:
+    response.delete_cookie(
+        key=COOKIE_NAME,
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite="strict",
+        path="/",
+    )
+
+
+def _require_verified_otp(result: OTPVerifyResult) -> None:
+    if result is OTPVerifyResult.VERIFIED:
+        return
+    if result is OTPVerifyResult.EXPIRED_OR_MISSING:
+        raise HTTPException(status_code=400, detail="otp expired or not issued")
+    if result is OTPVerifyResult.TOO_MANY_ATTEMPTS:
+        raise HTTPException(status_code=429, detail="too many otp attempts")
+    raise HTTPException(status_code=400, detail="invalid otp")
 
 
 @router.post("/sign-up", status_code=201, response_model=UserSchema)
@@ -82,7 +110,7 @@ async def log_in_handler(
     auth_service: AuthService = Depends(),
     rate_limit: LoginRateLimitService = Depends(),
 ):
-    ip = http_request.client.host if http_request.client else "unknown"
+    ip = get_client_ip(http_request)
 
     if await rate_limit.is_blocked(request.email, ip):
         raise HTTPException(status_code=429, detail="too many login attempts")
@@ -99,7 +127,7 @@ async def log_in_handler(
 
     response.set_cookie(
         key=COOKIE_NAME,
-        value=auth_service.create_jwt(user.id),
+        value=auth_service.create_jwt(user.id, token_version=int(user.token_version or 0)),
         httponly=True,
         secure=settings.cookie_secure,
         samesite="strict",
@@ -111,13 +139,7 @@ async def log_in_handler(
 
 @router.post("/log-out", status_code=200)
 async def log_out_handler(response: Response):
-    response.delete_cookie(
-        key=COOKIE_NAME,
-        httponly=True,
-        secure=settings.cookie_secure,
-        samesite="strict",
-        path="/",
-    )
+    _delete_access_cookie(response)
     return {"message": "logged out"}
 
 
@@ -179,6 +201,7 @@ async def send_password_change_otp_handler(
 @router.patch("/me/password", status_code=200)
 async def change_password_handler(
     request: PasswordChangeRequest,
+    response: Response,
     current_user: User = Depends(get_current_user),
     user_repo: UserRepository = Depends(),
     auth_service: AuthService = Depends(),
@@ -189,15 +212,19 @@ async def change_password_handler(
     ):
         raise HTTPException(status_code=403, detail="current password does not match")
 
-    saved = await otp_service.get_otp(current_user.email, purpose="password_change")
-    if saved is None:
-        raise HTTPException(status_code=400, detail="otp expired or not issued")
-    if saved != request.otp:
-        raise HTTPException(status_code=400, detail="invalid otp")
+    otp_result = await otp_service.verify_and_consume(
+        current_user.email,
+        request.otp,
+        purpose="password_change",
+    )
+    _require_verified_otp(otp_result)
 
     current_user.password = await auth_service.hash_password_async(request.new_password)
+    current_user.token_version = int(current_user.token_version or 0) + 1
     await user_repo.update_user(current_user)
-    await otp_service.delete_otp(current_user.email, purpose="password_change")
+
+    # 현재 쿠키도 즉시 제거하고, 다른 브라우저의 토큰은 token_version 비교로 거부한다.
+    _delete_access_cookie(response)
     return {"message": "password changed"}
 
 
@@ -208,9 +235,33 @@ async def upload_avatar_handler(
     user_repo: UserRepository = Depends(),
     upload_service: UploadService = Depends(),
 ):
+    previous_url = current_user.avatar_url
+    previous_filename = upload_service.managed_filename_from_url(previous_url)
+
     filename, _size = await upload_service.save(file)
     current_user.avatar_url = f"/img/{filename}"
-    return await user_repo.update_user(current_user)
+
+    try:
+        updated_user = await user_repo.update_user(current_user)
+    except Exception:
+        # DB 반영에 실패하면 새 파일이 고아가 되지 않도록 제거하고 메모리 상태도 복구한다.
+        current_user.avatar_url = previous_url
+        with suppress(OSError, ValueError):
+            await upload_service.delete(filename)
+        raise
+
+    # DB가 새 URL을 확정한 뒤에만 이전 로컬 아바타를 지운다. 삭제 실패는
+    # 프로필 변경 성공을 되돌릴 이유가 없으므로 로그만 남긴다.
+    if previous_filename is not None and previous_filename != filename:
+        try:
+            await upload_service.delete(previous_filename)
+        except (OSError, ValueError):
+            logger.exception(
+                "old avatar cleanup failed",
+                extra={"user_id": current_user.id, "filename": previous_filename},
+            )
+
+    return updated_user
 
 
 @router.get("/{id}/profile", status_code=200, response_model=PublicUserSchema)
@@ -230,7 +281,7 @@ async def get_user_comments_handler(
     page: int = Query(default=1, ge=1),
     size: int = Query(default=20, ge=1, le=50),
     viewer: User | None = Depends(get_current_user_optional),
-    comment_repo: CommentRepository = Depends(),
+    comment_repo: ProfileCommentRepository = Depends(),
     user_repo: UserRepository = Depends(),
 ):
     user = await user_repo.get_user_by_id(id)
@@ -365,16 +416,15 @@ async def verify_otp_handler(
     otp_service: OTPService = Depends(),
     user_repo: UserRepository = Depends(),
 ):
-    saved = await otp_service.get_otp(current_user.email, purpose="signup")
-    if saved is None:
-        raise HTTPException(status_code=400, detail="otp expired or not issued")
-    if saved != request.otp:
-        raise HTTPException(status_code=400, detail="invalid otp")
+    otp_result = await otp_service.verify_and_consume(
+        current_user.email,
+        request.otp,
+        purpose="signup",
+    )
+    _require_verified_otp(otp_result)
 
     current_user.is_verified = True
     await user_repo.update_user(current_user)
-    await otp_service.delete_otp(current_user.email, purpose="signup")
-
     return current_user
 
 
@@ -404,18 +454,18 @@ async def reset_password_verify_handler(
     otp_service: OTPService = Depends(),
     auth_service: AuthService = Depends(),
 ):
-    saved = await otp_service.get_otp(request.email, purpose="reset")
-    if saved is None:
-        raise HTTPException(status_code=400, detail="otp expired or not issued")
-    if saved != request.otp:
-        raise HTTPException(status_code=400, detail="invalid otp")
+    otp_result = await otp_service.verify_and_consume(
+        request.email,
+        request.otp,
+        purpose="reset",
+    )
+    _require_verified_otp(otp_result)
 
     user = await user_repo.get_user_by_email(request.email)
     if user is None:
         raise HTTPException(status_code=400, detail="invalid otp")
 
     user.password = await auth_service.hash_password_async(request.new_password)
+    user.token_version = int(user.token_version or 0) + 1
     await user_repo.update_user(user)
-    await otp_service.delete_otp(request.email, purpose="reset")
-
     return {"message": "password changed"}

@@ -6,13 +6,16 @@
 
 2026-07-28
 실제 이미지 검증 / 픽셀 제한 / 비동기 파일 저장·삭제
+아바타 교체 시 애플리케이션이 관리하는 기존 파일 식별 지원
 '''
 
 import asyncio
+import re
 import uuid
 import warnings
 from io import BytesIO
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+from urllib.parse import urlsplit
 
 from fastapi import HTTPException, UploadFile
 from PIL import Image, UnidentifiedImageError
@@ -38,6 +41,7 @@ PIL_FORMATS: dict[str, str] = {
 }
 
 UPLOAD_DIR = Path(__file__).resolve().parent.parent.parent / "static" / "img"
+_MANAGED_FILENAME = re.compile(r"^[0-9a-f]{32}\.(?:jpg|png|gif|webp)$")
 
 
 class UploadService:
@@ -73,6 +77,24 @@ class UploadService:
         if target.parent != root:
             raise ValueError("invalid upload filename")
         await asyncio.to_thread(target.unlink, missing_ok=True)
+
+    @staticmethod
+    def managed_filename_from_url(url: str | None) -> str | None:
+        """로컬 `/img/<uuid>.<ext>` URL이면 관리 대상 파일명만 반환한다.
+
+        외부 URL, 쿼리 문자열이 붙은 URL, 경로 탈출 형태, 사용자가 직접 지정한
+        일반 파일명은 삭제 대상으로 인정하지 않는다.
+        """
+        if not url:
+            return None
+        parsed = urlsplit(url)
+        if parsed.scheme or parsed.netloc or parsed.query or parsed.fragment:
+            return None
+        path = PurePosixPath(parsed.path)
+        if path.parent != PurePosixPath("/img"):
+            return None
+        filename = path.name
+        return filename if _MANAGED_FILENAME.fullmatch(filename) else None
 
     @staticmethod
     def _write_file(target: Path, data: bytes) -> None:

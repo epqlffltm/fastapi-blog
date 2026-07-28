@@ -11,22 +11,34 @@
 이메일/미인증 fixture 추가
 분류 / 업로드 fixture 추가
 권한 · 제재 fixture 추가
+
+2026-07-28
+OTP Lua 스크립트 동작을 반영한 Redis mock 추가
 '''
 
-import pytest
 from datetime import datetime, timedelta, timezone
+from unittest.mock import DEFAULT, AsyncMock, Mock
+
+import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import AsyncMock, Mock
 from redis.asyncio import Redis
-from app.main import app
-from app.database.orm import User
-from app.database.repository import PostRepository, CommentRepository, UserRepository, CategoryRepository, UploadRepository, LikeRepository
-from app.database.cache import get_redis_client
-from app.api.dependency import get_current_user
-from app.service.email import EmailService
-from app.service.upload import UploadService
-from app.service.ratelimit import LoginRateLimitService
+
 from app.api.dependency import get_current_user, get_current_user_optional
+from app.database.cache import get_redis_client
+from app.database.orm import User
+from app.database.profile_repository import ProfileCommentRepository
+from app.database.repository import (
+    CategoryRepository,
+    CommentRepository,
+    LikeRepository,
+    PostRepository,
+    UploadRepository,
+    UserRepository,
+)
+from app.main import app
+from app.service.email import EmailService
+from app.service.ratelimit import LoginRateLimitService
+from app.service.upload import UploadService
 
 
 @pytest.fixture
@@ -41,6 +53,7 @@ def current_user():
         id=1,
         email="test@example.com",
         password="$2b$12$fakehashedpassword",
+        token_version=0,
         nickname="tester",
         is_verified=True,
         can_comment=True,
@@ -127,6 +140,14 @@ def mock_comment_repo():
 
 
 @pytest.fixture
+def mock_profile_comment_repo():
+    repo = AsyncMock(spec=ProfileCommentRepository)
+    app.dependency_overrides[ProfileCommentRepository] = lambda: repo
+    yield repo
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
 def mock_user_repo():
     repo = AsyncMock(spec=UserRepository)
     app.dependency_overrides[UserRepository] = lambda: repo
@@ -166,8 +187,38 @@ def mock_redis():
     redis.set = AsyncMock()
     redis.get = AsyncMock()
     redis.delete = AsyncMock()
-    redis.eval = AsyncMock(return_value=1)
     redis.aclose = AsyncMock()
+
+    eval_mock = AsyncMock()
+
+    async def eval_side_effect(script, _num_keys, *args):
+        # 개별 테스트가 return_value를 지정하면 그 값을 최우선으로 쓴다.
+        forced_result = eval_mock._mock_return_value
+        if forced_result is not DEFAULT:
+            return forced_result
+
+        if "OTP_SAVE_AND_RESET_ATTEMPTS" in script:
+            # Lua 내부 DEL을 테스트 상태에도 반영한다.
+            await redis.delete(args[1])
+            return 1
+
+        if "OTP_VERIFY_AND_CONSUME" in script:
+            saved = redis.get.return_value
+            if saved is None:
+                return -1
+
+            provided = str(args[2])
+            if str(saved) == provided:
+                # 실제 Redis에서는 두 DEL이 EVAL 내부에서 한 번에 수행된다.
+                await redis.delete(args[0], args[1])
+                return 1
+            return 0
+
+        # OTP 발급 슬롯 등 성공이 기본인 스크립트.
+        return 1
+
+    eval_mock.side_effect = eval_side_effect
+    redis.eval = eval_mock
 
     app.dependency_overrides[get_redis_client] = lambda: redis
     yield redis
@@ -190,7 +241,8 @@ def mock_email_service():
     app.dependency_overrides[EmailService] = lambda: service
     yield service
     app.dependency_overrides.clear()
-    
+
+
 @pytest.fixture
 def admin_viewer(client, current_user):
     """공개 조회(get_current_user_optional)를 관리자 눈으로 본다"""

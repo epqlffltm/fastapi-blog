@@ -20,11 +20,16 @@ role → 권한 체크박스 / 정지 · 강퇴
 
 2026-07-26
 조회수 컬럼 / 좋아요(likes) 테이블
+
+2026-07-28
+비밀번호 변경 시 기존 JWT를 무효화하는 token_version 추가
 '''
 
-from sqlalchemy import ForeignKey, String, UniqueConstraint, DateTime
-from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime, timezone
+
+from sqlalchemy import DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from .connection import Base    # connection의 Base 재사용 (새로 만들지 않음)
 
 
@@ -41,6 +46,7 @@ PERMISSIONS: tuple[tuple[str, str], ...] = (
 )
 
 PERMISSION_NAMES: tuple[str, ...] = tuple(name for name, _ in PERMISSIONS)
+
 
 class Post(Base):
     __tablename__ = "posts"
@@ -147,6 +153,7 @@ class User(Base):    # 회원 테이블
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     email: Mapped[str] = mapped_column(String(256), unique=True, index=True)
     password: Mapped[str] = mapped_column(String(256))
+    token_version: Mapped[int] = mapped_column(default=0)
     nickname: Mapped[str] = mapped_column(String(64), unique=True)
     is_verified: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -202,6 +209,7 @@ class User(Base):    # 회원 테이블
         return cls(
             email=email,
             password=hashed_password,
+            token_version=0,
             nickname=nickname,
             can_comment=True,
             can_write_post=False,
@@ -236,7 +244,6 @@ class Category(Base):    # 글 분류 (사이드바)
             name=request.name,
             display_order=request.display_order,
         )
-
 
 
 class Like(Base):    # 글 좋아요

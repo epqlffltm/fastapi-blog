@@ -16,8 +16,10 @@ async 전환 (asyncpg) / echo 를 설정으로
 2026-07-28
 업로드 이미지 크기 제한 설정 추가
 JWT 비밀키 길이와 알고리즘 검증 추가
+신뢰 프록시 CIDR 설정 검증 추가
 '''
 
+from ipaddress import ip_network
 from typing import Literal
 
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
@@ -45,6 +47,7 @@ class Settings(BaseSettings):
     upload_max_height: int = 10_000
     upload_max_pixels: int = 25_000_000
     db_echo: bool = False    # 배포에선 False, 로컬 디버깅 때만 True
+    trusted_proxy_cidrs: str = ""  # 쉼표 구분. 비어 있으면 전달 IP 헤더를 신뢰하지 않음
 
     @field_validator("jwt_secret_key")
     @classmethod
@@ -53,6 +56,21 @@ class Settings(BaseSettings):
         if len(value.encode("utf-8")) < 32:
             raise ValueError("JWT_SECRET_KEY must be at least 32 UTF-8 bytes")
         return value
+
+    @field_validator("trusted_proxy_cidrs")
+    @classmethod
+    def validate_trusted_proxy_cidrs(cls, value: str) -> str:
+        """잘못된 프록시 CIDR은 조용히 무시하지 않고 기동 시 거부한다."""
+        normalized: list[str] = []
+        for item in value.split(","):
+            candidate = item.strip()
+            if not candidate:
+                continue
+            try:
+                normalized.append(str(ip_network(candidate, strict=False)))
+            except ValueError as exc:
+                raise ValueError(f"invalid trusted proxy CIDR: {candidate}") from exc
+        return ",".join(normalized)
 
 
 settings = Settings()
