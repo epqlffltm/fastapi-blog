@@ -30,9 +30,12 @@ from datetime import datetime, timezone
 from sqlalchemy import DateTime, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from .connection import Base
+from .connection import Base    # connection의 Base 재사용 (새로 만들지 않음)
 
 
+# 관리 화면의 체크박스와 1:1. 순서가 곧 화면 순서다.
+# 새 권한을 추가하려면 여기에 한 줄 넣고, User에 같은 이름의 컬럼을 추가하고,
+# request.PermissionUpdateRequest / response.UserSchema 에도 같은 필드를 더한다
 PERMISSIONS: tuple[tuple[str, str], ...] = (
     ("can_comment", "댓글"),
     ("can_write_post", "글쓰기"),
@@ -41,6 +44,7 @@ PERMISSIONS: tuple[tuple[str, str], ...] = (
     ("can_manage_post", "글 관리"),
     ("can_manage_user", "회원 관리"),
 )
+
 PERMISSION_NAMES: tuple[str, ...] = tuple(name for name, _ in PERMISSIONS)
 
 
@@ -53,11 +57,12 @@ class Post(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     title: Mapped[str]
-    contents: Mapped[str]
+    contents: Mapped[str]                              # 마크다운 원문
     thumbnail_url: Mapped[str | None] = mapped_column(String(512), default=None)
     is_deleted: Mapped[bool] = mapped_column(default=False)
-    view_count: Mapped[int] = mapped_column(default=0)
+    view_count: Mapped[int] = mapped_column(default=0)   # 글 조회수
 
+    # N:1 이라 joined 로딩이 적합 (글 하나당 작성자·분류 하나)
     user: Mapped["User"] = relationship(back_populates="posts", lazy="joined")
     category: Mapped["Category"] = relationship(back_populates="posts", lazy="joined")
     comments: Mapped[list["Comment"]] = relationship(back_populates="post", lazy="selectin")
@@ -71,7 +76,7 @@ class Post(Base):
         return cls(
             title=request.title,
             contents=request.contents,
-            user_id=user_id,
+            user_id=user_id,          # 작성자는 요청이 아니라 토큰에서 온다
             category_id=request.category_id,
             created_at=now,
             updated_at=now,
@@ -84,6 +89,8 @@ class Comment(Base):
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     post_id: Mapped[int] = mapped_column(ForeignKey("posts.id"))
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    # 자기 테이블을 가리킨다. None 이면 원댓글, 값이 있으면 그 댓글의 답글.
+    # 깊이 1 제한은 DB가 아니라 핸들러가 지킨다 (답글에 답글을 막는다)
     parent_id: Mapped[int | None] = mapped_column(
         ForeignKey("comments.id"), index=True, default=None
     )
@@ -111,7 +118,7 @@ class Comment(Base):
         )
 
 
-class Upload(Base):
+class Upload(Base):    # 업로드된 파일 기록 (본문 위치는 마크다운이 갖는다)
     __tablename__ = "uploads"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
@@ -127,12 +134,8 @@ class Upload(Base):
 
     @classmethod
     def create(
-        cls,
-        user_id: int,
-        filename: str,
-        original_name: str,
-        content_type: str,
-        size: int,
+        cls, user_id: int, filename: str, original_name: str,
+        content_type: str, size: int,
     ) -> "Upload":
         return cls(
             user_id=user_id,
@@ -144,7 +147,7 @@ class Upload(Base):
         )
 
 
-class User(Base):
+class User(Base):    # 회원 테이블
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
@@ -154,9 +157,11 @@ class User(Base):
     nickname: Mapped[str] = mapped_column(String(64), unique=True)
     is_verified: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    bio: Mapped[str | None] = mapped_column(String(500), default=None)
-    avatar_url: Mapped[str | None] = mapped_column(String(255), default=None)
+    bio: Mapped[str | None] = mapped_column(String(500), default=None)   # 자기소개
+    avatar_url: Mapped[str | None] = mapped_column(String(255), default=None)   # 프로필 이미지 URL
 
+    # 권한 — 등급 하나가 아니라 기능별로 켜고 끈다.
+    # 새 기능이 생기면 컬럼 하나만 늘리면 되고, 등급표를 다시 짤 필요가 없다
     can_comment: Mapped[bool] = mapped_column(default=True)
     can_write_post: Mapped[bool] = mapped_column(default=False)
     can_upload: Mapped[bool] = mapped_column(default=False)
@@ -164,11 +169,14 @@ class User(Base):
     can_manage_user: Mapped[bool] = mapped_column(default=False)
     can_manage_post: Mapped[bool] = mapped_column(default=False)
 
-    suspended_until: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), default=None
-    )
+    # 제재 — 정지는 기한이 지나면 저절로 풀리고, 강퇴는 사람이 풀어야 한다
+    suspended_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     is_banned: Mapped[bool] = mapped_column(default=False)
 
+    # back_populates 를 위한 역방향일 뿐, 코드에서 한 번도 읽지 않는다.
+    # selectin 이면 User 를 한 명 읽을 때마다 그 사람의 글·댓글을 전부 끌고 오고,
+    # 글은 다시 user·category 를 joined 로 물어 연쇄가 된다 (로그인 상태의 모든 요청에서).
+    # raise 로 두면 실수로 접근하는 순간 조용한 쿼리 폭주 대신 예외로 드러난다
     posts: Mapped[list["Post"]] = relationship(back_populates="user", lazy="raise")
     comments: Mapped[list["Comment"]] = relationship(back_populates="user", lazy="raise")
 
@@ -179,6 +187,7 @@ class User(Base):
     def is_suspended(self) -> bool:
         if self.suspended_until is None:
             return False
+        # 컬럼이 timestamptz(시간대 포함)라 DB 에서 읽어도 aware. 그대로 비교하면 된다
         return self.suspended_until > datetime.now(timezone.utc)
 
     @property
@@ -195,6 +204,8 @@ class User(Base):
 
     @classmethod
     def create(cls, email: str, hashed_password: str, nickname: str) -> "User":
+        # 반드시 해싱된 비번을 받는다 (평문 저장 금지)
+        # 가입 직후엔 댓글만. 나머지는 관리자가 켜준다
         return cls(
             email=email,
             password=hashed_password,
@@ -212,14 +223,15 @@ class User(Base):
         )
 
 
-class Category(Base):
+class Category(Base):    # 글 분류 (사이드바)
     __tablename__ = "categories"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    slug: Mapped[str] = mapped_column(String(32), unique=True, index=True)
-    name: Mapped[str] = mapped_column(String(32), unique=True)
+    slug: Mapped[str] = mapped_column(String(32), unique=True, index=True)  # URL에 쓰는 이름
+    name: Mapped[str] = mapped_column(String(32), unique=True)              # 화면에 보이는 이름
     display_order: Mapped[int] = mapped_column(default=0)
 
+    # User 쪽과 같은 이유. 사이드바 글 수는 GROUP BY 로 따로 센다
     posts: Mapped[list["Post"]] = relationship(back_populates="category", lazy="raise")
 
     def __repr__(self):
@@ -234,7 +246,7 @@ class Category(Base):
         )
 
 
-class Like(Base):
+class Like(Base):    # 글 좋아요
     __tablename__ = "likes"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
@@ -242,6 +254,8 @@ class Like(Base):
     post_id: Mapped[int] = mapped_column(ForeignKey("posts.id"), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
+    # (user_id, post_id) 조합을 유일하게 — 한 사람이 같은 글에 두 번 좋아요 못 누른다.
+    # 중복 방지를 앱 로직이 아니라 DB 제약으로 보장한다
     __table_args__ = (
         UniqueConstraint("user_id", "post_id", name="uq_likes_user_post"),
     )
