@@ -10,7 +10,8 @@ DB 기록 실패 시 저장 파일 정리
 
 from contextlib import suppress
 
-from fastapi import APIRouter, Depends, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from sqlalchemy.exc import IntegrityError
 
 from ..database.orm import Upload, User
 from ..database.repository import UploadRepository
@@ -41,6 +42,11 @@ async def upload_handler(
                 size=size,
             )
         )
+    except IntegrityError as exc:
+        # 무결성 충돌이 나면 새 파일을 지우고 409로 응답한다.
+        with suppress(OSError):
+            await upload_service.delete(filename)
+        raise HTTPException(status_code=409, detail="upload conflict") from exc
     except Exception:
         # 파일 저장 후 DB 기록만 실패하면 고아 파일이 남으므로 정리한다.
         # 삭제 실패가 원래 DB 예외를 가리지 않도록 OSError만 무시한다.

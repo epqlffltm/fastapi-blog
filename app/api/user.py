@@ -11,7 +11,9 @@ httpOnly 쿠키 로그인 / 로그아웃
 '''
 
 from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response, UploadFile
+from sqlalchemy.exc import IntegrityError
 from ..database.connection import settings
 from ..database.orm import User
 from ..database.repository import UserRepository
@@ -51,8 +53,14 @@ async def sign_up_handler(
         hashed_password=hashed,
         nickname=request.nickname,
     )
-    user = await user_repo.save_user(user)
-    return user
+    try:
+        return await user_repo.save_user(user)
+    except IntegrityError as exc:
+        # 사전 중복 조회 뒤 다른 요청이 먼저 저장한 경쟁 상태
+        raise HTTPException(
+            status_code=409,
+            detail="email or nickname already exists",
+        ) from exc
 
 
 @router.post("/log-in", status_code=200, response_model=UserSchema)#로그인
@@ -109,7 +117,11 @@ async def update_me_handler(
     user_repo: UserRepository = Depends(),
 ):
     # 닉네임을 바꾸면 다른 사람이 이미 쓰는지 확인한다 (자기 자신은 예외)
-    if request.nickname is not None and request.nickname != current_user.nickname:
+    nickname_changed = (
+        request.nickname is not None
+        and request.nickname != current_user.nickname
+    )
+    if nickname_changed:
         existing = await user_repo.get_user_by_nickname(request.nickname)
         if existing is not None and existing.id != current_user.id:
             raise HTTPException(status_code=409, detail="nickname already exists")
@@ -119,7 +131,15 @@ async def update_me_handler(
     if request.bio is not None:
         current_user.bio = request.bio
 
-    return await user_repo.update_user(current_user)
+    try:
+        return await user_repo.update_user(current_user)
+    except IntegrityError as exc:
+        if nickname_changed:
+            raise HTTPException(
+                status_code=409,
+                detail="nickname already exists",
+            ) from exc
+        raise
 
 
 @router.post("/me/password/otp", status_code=200)#비밀번호 변경용 코드 발송
@@ -130,11 +150,11 @@ async def send_password_change_otp_handler(
     email_service: EmailService = Depends(),
 ):
     # 로그인된 본인의 이메일로만 보낸다 (요청에서 이메일을 안 받아, 남의 주소로 못 보냄)
-    if not otp_service.acquire_send_slot(current_user.email, purpose="password_change"):
+    if not await otp_service.acquire_send_slot(current_user.email, purpose="password_change"):
         raise HTTPException(status_code=429, detail="too many requests")
 
     otp = otp_service.create_otp()
-    otp_service.save_otp(email=current_user.email, otp=otp, purpose="password_change")
+    await otp_service.save_otp(email=current_user.email, otp=otp, purpose="password_change")
     background_tasks.add_task(
         email_service.send_password_reset, current_user.email, otp
     )
@@ -154,7 +174,7 @@ async def change_password_handler(
         raise HTTPException(status_code=403, detail="current password does not match")
 
     # 2) 이메일 OTP 확인 — 비번을 알고 로그인했어도 이메일 계정까지 못 뚫으면 막힌다 (2차 인증)
-    saved = otp_service.get_otp(current_user.email, purpose="password_change")
+    saved = await otp_service.get_otp(current_user.email, purpose="password_change")
     if saved is None:
         raise HTTPException(status_code=400, detail="otp expired or not issued")
     if saved != request.otp:
@@ -162,7 +182,7 @@ async def change_password_handler(
 
     current_user.password = auth_service.hash_password(request.new_password)
     await user_repo.update_user(current_user)
-    otp_service.delete_otp(current_user.email, purpose="password_change")   # 재사용 방지
+    await otp_service.delete_otp(current_user.email, purpose="password_change")   # 재사용 방지
     return {"message": "password changed"}
 
 
@@ -271,11 +291,11 @@ async def create_otp_handler(
 ):
     if current_user.is_verified:
         raise HTTPException(status_code=409, detail="already verified")
-    if not otp_service.acquire_send_slot(current_user.email, purpose="signup"):
+    if not await otp_service.acquire_send_slot(current_user.email, purpose="signup"):
         raise HTTPException(status_code=429, detail="too many requests")
 
     otp = otp_service.create_otp()
-    otp_service.save_otp(email=current_user.email, otp=otp, purpose="signup")
+    await otp_service.save_otp(email=current_user.email, otp=otp, purpose="signup")
 
     # 메일 발송은 느리므로 응답을 먼저 보내고 뒤에서 처리
     background_tasks.add_task(email_service.send_otp, current_user.email, otp)
@@ -290,7 +310,7 @@ async def verify_otp_handler(
     otp_service: OTPService = Depends(),
     user_repo: UserRepository = Depends(),
 ):
-    saved = otp_service.get_otp(current_user.email, purpose="signup")
+    saved = await otp_service.get_otp(current_user.email, purpose="signup")
     if saved is None:      # 발급 안 했거나 3분이 지나 만료됨
         raise HTTPException(status_code=400, detail="otp expired or not issued")
     if saved != request.otp:
@@ -298,7 +318,7 @@ async def verify_otp_handler(
 
     current_user.is_verified = True
     await user_repo.update_user(current_user)
-    otp_service.delete_otp(current_user.email, purpose="signup")   # 1회용이므로 즉시 폐기
+    await otp_service.delete_otp(current_user.email, purpose="signup")   # 1회용이므로 즉시 폐기
 
     return current_user
 
@@ -313,9 +333,9 @@ async def reset_password_handler(
 ):
     # 계정이 없어도 있는 것처럼 응답한다 (가입 여부 노출 방지)
     user = await user_repo.get_user_by_email(request.email)
-    if user is not None and otp_service.acquire_send_slot(request.email, purpose="reset"):
+    if user is not None and await otp_service.acquire_send_slot(request.email, purpose="reset"):
         otp = otp_service.create_otp()
-        otp_service.save_otp(email=request.email, otp=otp, purpose="reset")
+        await otp_service.save_otp(email=request.email, otp=otp, purpose="reset")
         background_tasks.add_task(
             email_service.send_password_reset, request.email, otp
         )
@@ -330,7 +350,7 @@ async def reset_password_verify_handler(
     otp_service: OTPService = Depends(),
     auth_service: AuthService = Depends(),
 ):
-    saved = otp_service.get_otp(request.email, purpose="reset")
+    saved = await otp_service.get_otp(request.email, purpose="reset")
     if saved is None:
         raise HTTPException(status_code=400, detail="otp expired or not issued")
     if saved != request.otp:
@@ -342,6 +362,6 @@ async def reset_password_verify_handler(
 
     user.password = auth_service.hash_password(request.new_password)
     await user_repo.update_user(user)
-    otp_service.delete_otp(request.email, purpose="reset")
+    await otp_service.delete_otp(request.email, purpose="reset")
 
     return {"message": "password changed"}

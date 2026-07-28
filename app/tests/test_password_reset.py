@@ -84,7 +84,7 @@ def test_reset_password_verify(client, mock_user_repo, mock_redis):
     assert response.status_code == 200
     assert user.password != old_hash                    # 실제로 바뀌었나
     assert AuthService().verify_password("newpassword123", user.password)
-    mock_redis.delete.assert_called_once()              # 1회용이므로 폐기
+    mock_redis.delete.assert_awaited_once()              # 1회용이므로 폐기
     mock_user_repo.update_user.assert_called_once()
 
 

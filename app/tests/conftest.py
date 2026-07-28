@@ -17,7 +17,7 @@ import pytest
 from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
 from unittest.mock import AsyncMock, Mock
-from redis import Redis
+from redis.asyncio import Redis
 from app.main import app
 from app.database.orm import User
 from app.database.repository import PostRepository, CommentRepository, UserRepository, CategoryRepository, UploadRepository, LikeRepository
@@ -161,8 +161,13 @@ def mock_upload_service():
 @pytest.fixture
 def mock_redis():
     redis = Mock(spec=Redis)
-    # OTP 발송 제한 Lua 스크립트의 기본 상태: 발송 허용
-    redis.eval.return_value = 1
+    # redis.asyncio 명령은 await 대상이므로 각 메서드를 AsyncMock으로 둔다.
+    redis.set = AsyncMock()
+    redis.get = AsyncMock()
+    redis.delete = AsyncMock()
+    redis.eval = AsyncMock(return_value=1)
+    redis.aclose = AsyncMock()
+
     app.dependency_overrides[get_redis_client] = lambda: redis
     yield redis
     app.dependency_overrides.clear()

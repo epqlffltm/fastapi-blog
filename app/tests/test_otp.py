@@ -10,7 +10,7 @@ OTP API 테스트
 '''
 
 from unittest.mock import Mock
-from redis import Redis
+from redis.asyncio import Redis
 from app.service.otp import OTPService
 
 
@@ -65,7 +65,7 @@ def test_verify_otp(auth_client, current_user, mock_redis, mock_user_repo):
     assert response.status_code == 200
     assert response.json()["is_verified"] is True
     assert current_user.is_verified is True
-    mock_redis.delete.assert_called_once()      # 1회용이므로 폐기됐나
+    mock_redis.delete.assert_awaited_once()      # 1회용이므로 폐기됐나
     mock_user_repo.update_user.assert_called_once()
 
 
@@ -78,7 +78,7 @@ def test_verify_otp_wrong(auth_client, current_user, mock_redis, mock_user_repo)
     assert response.status_code == 400
     assert response.json()["detail"] == "invalid otp"
     assert current_user.is_verified is False
-    mock_redis.delete.assert_not_called()
+    mock_redis.delete.assert_not_awaited()
 
 
 def test_verify_otp_expired(auth_client, current_user, mock_redis, mock_user_repo):

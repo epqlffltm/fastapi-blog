@@ -12,6 +12,7 @@
 '''
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import IntegrityError
 from ..database.orm import Category, User
 from ..database.repository import CategoryRepository
 from ..schema.request import CategoryCreate, CategoryUpdate
@@ -60,7 +61,14 @@ async def create_category_handler(
     if await category_repo.get_category_by_name(request.name) is not None:
         raise HTTPException(status_code=409, detail="name already exists")
 
-    return await category_repo.save(Category.create(request))
+    try:
+        return await category_repo.save(Category.create(request))
+    except IntegrityError as exc:
+        # 사전 조회 뒤 다른 요청이 같은 slug/name을 먼저 저장한 경우
+        raise HTTPException(
+            status_code=409,
+            detail="slug or name already exists",
+        ) from exc
 
 
 @router.patch("/categories/{id}", status_code=200, response_model=CategorySchema)#분류 이름 변경
@@ -80,7 +88,10 @@ async def update_category_handler(
         raise HTTPException(status_code=409, detail="name already exists")
 
     category.name = request.name
-    return await category_repo.update(category)
+    try:
+        return await category_repo.update(category)
+    except IntegrityError as exc:
+        raise HTTPException(status_code=409, detail="name already exists") from exc
 
 
 @router.delete("/categories/{id}", status_code=204)#분류 삭제 (글은 미분류로 이동)

@@ -42,7 +42,7 @@ from .dependency import (
     get_current_user_optional,
 )
 from ..database.cache import get_redis_client
-from redis import Redis
+from redis.asyncio import Redis
 
 router = APIRouter(tags=["post"])
 
@@ -114,7 +114,7 @@ async def get_page_handler(
     # IP 마다 Redis 키를 두어, 없을 때만(=처음 볼 때만) +1 한다 — 새로고침 뻥튀기 방지
     if not post.is_deleted:
         ip = request.client.host if request.client else "unknown"
-        first_view = redis.set(
+        first_view = await redis.set(
             f"viewed:{post.id}:{ip}", "1", nx=True, ex=VIEW_DEDUP_TTL_SECONDS
         )
         if first_view:

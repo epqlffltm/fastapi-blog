@@ -12,6 +12,7 @@ httpOnly 쿠키 로그인 / 로그아웃
 import jwt
 import pytest
 from datetime import datetime, timedelta, timezone
+from sqlalchemy.exc import IntegrityError
 from app.database.connection import settings
 from app.database.orm import User
 from app.service.auth import AuthService
@@ -81,6 +82,46 @@ def test_sign_up_duplicate_nickname(client, mock_user_repo):
         "/user/sign-up",
         json={"email": "new@example.com", "password": "password123", "nickname": "tester"},
     )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "nickname already exists"
+
+
+def test_sign_up_integrity_conflict(client, mock_user_repo):
+    """사전 조회 뒤 다른 요청이 먼저 가입해도 500 대신 409."""
+    mock_user_repo.get_user_by_email.return_value = None
+    mock_user_repo.get_user_by_nickname.return_value = None
+    mock_user_repo.save_user.side_effect = IntegrityError(
+        "duplicate user",
+        {},
+        Exception("unique violation"),
+    )
+
+    response = client.post(
+        "/user/sign-up",
+        json={
+            "email": "test@example.com",
+            "password": "password123",
+            "nickname": "tester",
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "email or nickname already exists"
+
+
+def test_update_me_nickname_integrity_conflict(
+    auth_client, current_user, mock_user_repo
+):
+    """닉네임 중복 경쟁 상태도 409로 처리한다."""
+    mock_user_repo.get_user_by_nickname.return_value = None
+    mock_user_repo.update_user.side_effect = IntegrityError(
+        "duplicate nickname",
+        {},
+        Exception("unique violation"),
+    )
+
+    response = auth_client.patch("/user/me", json={"nickname": "taken"})
 
     assert response.status_code == 409
     assert response.json()["detail"] == "nickname already exists"
@@ -293,6 +334,7 @@ def test_change_password(auth_client, mock_user_repo, current_user, mock_redis):
     assert response.status_code == 200
     assert service.verify_password("newpass456", current_user.password) is True
     mock_user_repo.update_user.assert_called_once()
+    mock_redis.delete.assert_awaited_once()
 
 
 def test_change_password_wrong_otp(auth_client, mock_user_repo, current_user, mock_redis):
@@ -357,19 +399,21 @@ def test_create_otp_uses_secrets(monkeypatch):
     assert OTPService.create_otp() == 100_000
 
 
-def test_otp_send_slot_allowed(mock_redis):
+@pytest.mark.asyncio
+async def test_otp_send_slot_allowed(mock_redis):
     service = OTPService(redis=mock_redis)
     mock_redis.eval.return_value = 1
 
-    assert service.acquire_send_slot("test@example.com", purpose="signup") is True
-    mock_redis.eval.assert_called_once()
+    assert await service.acquire_send_slot("test@example.com", purpose="signup") is True
+    mock_redis.eval.assert_awaited_once()
 
 
-def test_otp_send_slot_rejected(mock_redis):
+@pytest.mark.asyncio
+async def test_otp_send_slot_rejected(mock_redis):
     service = OTPService(redis=mock_redis)
     mock_redis.eval.return_value = 0
 
-    assert service.acquire_send_slot("test@example.com", purpose="signup") is False
+    assert await service.acquire_send_slot("test@example.com", purpose="signup") is False
 
 
 def test_send_password_change_otp(auth_client, mock_redis, mock_email_service):

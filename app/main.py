@@ -25,13 +25,24 @@ category / upload 라우터 추가
 관리 페이지
 '''
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from .api import post, comment, user, category, upload
+from .database.cache import close_redis_client
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    try:
+        yield
+    finally:
+        await close_redis_client()
+
+
+app = FastAPI(lifespan=lifespan)
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 

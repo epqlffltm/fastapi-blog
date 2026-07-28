@@ -155,6 +155,7 @@ def test_get_page(client, mock_post_repo, mock_redis):
     assert data["title"] == "테스트 글"
     assert data["category"]["name"] == "TRPG"
     assert data["comments"] == []
+    mock_redis.set.assert_awaited_once()
 
 
 def test_get_page_not_found(client, mock_post_repo):
@@ -475,6 +476,7 @@ def test_view_count_increments_on_first_view(client, mock_post_repo, mock_redis)
     assert response.status_code == 200
     assert response.json()["view_count"] == 6
     mock_post_repo.increment_view_count.assert_called_once_with(1)
+    mock_redis.set.assert_awaited_once()
 
 
 def test_view_count_dedup_same_ip(client, mock_post_repo, mock_redis):
@@ -487,6 +489,7 @@ def test_view_count_dedup_same_ip(client, mock_post_repo, mock_redis):
 
     assert response.status_code == 200
     mock_post_repo.increment_view_count.assert_not_called()
+    mock_redis.set.assert_awaited_once()
 
 
 def test_view_count_skipped_for_deleted_post(admin_viewer, mock_post_repo):

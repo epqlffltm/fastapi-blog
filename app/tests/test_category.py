@@ -5,6 +5,8 @@
 분류 API 테스트
 '''
 
+from sqlalchemy.exc import IntegrityError
+
 from app.database.orm import Category
 
 
@@ -90,6 +92,25 @@ def test_create_category_duplicate_name(admin_client, mock_category_repo):
     mock_category_repo.save.assert_not_called()
 
 
+def test_create_category_integrity_conflict(admin_client, mock_category_repo):
+    """사전 조회 뒤 다른 요청이 먼저 저장해도 500 대신 409."""
+    mock_category_repo.get_category_by_slug.return_value = None
+    mock_category_repo.get_category_by_name.return_value = None
+    mock_category_repo.save.side_effect = IntegrityError(
+        "duplicate category",
+        {},
+        Exception("unique violation"),
+    )
+
+    response = admin_client.post(
+        "/categories",
+        json={"slug": "book", "name": "독서"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "slug or name already exists"
+
+
 def test_create_category_invalid_slug(admin_client, mock_category_repo):
     """slug 는 URL 에 들어가므로 영소문자·숫자·하이픈만"""
     for bad in ["한글", "With Space", "UPPER", "sym!bol"]:
@@ -135,6 +156,22 @@ def test_update_category_duplicate_name(admin_client, mock_category_repo):
 
     assert response.status_code == 409
     mock_category_repo.update.assert_not_called()
+
+
+def test_update_category_integrity_conflict(admin_client, mock_category_repo):
+    target = _make_category(id=1, slug="dnd", name="TRPG")
+    mock_category_repo.get_category_by_id.return_value = target
+    mock_category_repo.get_category_by_name.return_value = None
+    mock_category_repo.update.side_effect = IntegrityError(
+        "duplicate category name",
+        {},
+        Exception("unique violation"),
+    )
+
+    response = admin_client.patch("/categories/1", json={"name": "개발"})
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "name already exists"
 
 
 def test_update_category_not_found(admin_client, mock_category_repo):

@@ -23,13 +23,31 @@ UploadRepository 추가 (save_with_images 제거)
 
 2026-07-26
 LikeRepository (좋아요 추가/삭제/카운트/존재확인)
+
+2026-07-28
+쓰기 작업 실패 시 rollback / 좋아요 중복 INSERT 원자 처리
 '''
+
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 from fastapi import Depends
 from sqlalchemy import select, func, update as sa_update, delete as sa_delete
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from .connection import get_db
 from .orm import Post, Comment, Upload, User, Category, Like
+
+
+@asynccontextmanager
+async def _write_transaction(session: AsyncSession):
+    """쓰기 중 실패하면 세션을 rollback한 뒤 원래 예외를 다시 전달한다."""
+    try:
+        yield
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        raise
 
 
 class PostRepository:
@@ -76,24 +94,27 @@ class PostRepository:
         )
 
     async def save(self, post: Post) -> Post:
-        self.session.add(post)
-        await self.session.commit()
+        async with _write_transaction(self.session):
+            self.session.add(post)
         await self.session.refresh(post)
         return post
 
     async def update(self, post: Post) -> Post:
         # 이미 세션이 추적 중인 객체 → commit만
-        await self.session.commit()
+        async with _write_transaction(self.session):
+            pass
         await self.session.refresh(post)
         return post
 
     async def increment_view_count(self, post_id: int) -> int:
         # DB 레벨에서 원자적으로 +1 (읽고-더하고-쓰기 사이의 경합을 피한다).
         # 갱신 후의 값을 다시 읽어 응답에 쓴다
-        await self.session.execute(
-            sa_update(Post).where(Post.id == post_id).values(view_count=Post.view_count + 1)
-        )
-        await self.session.commit()
+        async with _write_transaction(self.session):
+            await self.session.execute(
+                sa_update(Post)
+                .where(Post.id == post_id)
+                .values(view_count=Post.view_count + 1)
+            )
         return await self.session.scalar(select(Post.view_count).where(Post.id == post_id))
 
 
@@ -107,13 +128,14 @@ class CommentRepository:
         )
 
     async def save(self, comment: Comment) -> Comment:
-        self.session.add(comment)
-        await self.session.commit()
+        async with _write_transaction(self.session):
+            self.session.add(comment)
         await self.session.refresh(comment)
         return comment
 
     async def update(self, comment: Comment) -> Comment:
-        await self.session.commit()
+        async with _write_transaction(self.session):
+            pass
         await self.session.refresh(comment)
         return comment
 
@@ -136,13 +158,14 @@ class UserRepository:
         return await self.session.scalar(select(User).where(User.id == id))
 
     async def save_user(self, user: User) -> User:
-        self.session.add(user)
-        await self.session.commit()
+        async with _write_transaction(self.session):
+            self.session.add(user)
         await self.session.refresh(user)
         return user
 
     async def update_user(self, user: User) -> User:
-        await self.session.commit()
+        async with _write_transaction(self.session):
+            pass
         await self.session.refresh(user)
         return user
 
@@ -182,14 +205,15 @@ class CategoryRepository:
         )
 
     async def save(self, category: Category) -> Category:
-        self.session.add(category)
-        await self.session.commit()
+        async with _write_transaction(self.session):
+            self.session.add(category)
         await self.session.refresh(category)
         return category
 
     async def update(self, category: Category) -> Category:
         # 이미 세션이 추적 중인 객체 → commit만
-        await self.session.commit()
+        async with _write_transaction(self.session):
+            pass
         await self.session.refresh(category)
         return category
 
@@ -197,11 +221,13 @@ class CategoryRepository:
         # 그 분류의 글을 전부 미분류로 옮긴 뒤 빈 분류를 삭제한다.
         # 소프트삭제된 글도 category_id 로 FK 를 물고 있으므로 is_deleted 를 안 가린다.
         # 두 작업을 한 커밋으로 묶어 중간 실패 시 어정쩡한 상태를 남기지 않는다
-        await self.session.execute(
-            sa_update(Post).where(Post.category_id == category.id).values(category_id=fallback_id)
-        )
-        await self.session.delete(category)
-        await self.session.commit()
+        async with _write_transaction(self.session):
+            await self.session.execute(
+                sa_update(Post)
+                .where(Post.category_id == category.id)
+                .values(category_id=fallback_id)
+            )
+            await self.session.delete(category)
 
 
 class UploadRepository:
@@ -209,8 +235,8 @@ class UploadRepository:
         self.session = session
 
     async def save(self, upload: Upload) -> Upload:
-        self.session.add(upload)
-        await self.session.commit()
+        async with _write_transaction(self.session):
+            self.session.add(upload)
         await self.session.refresh(upload)
         return upload
 
@@ -235,11 +261,24 @@ class LikeRepository:
         return row is not None
 
     async def add(self, user_id: int, post_id: int) -> None:
-        self.session.add(Like.create(user_id=user_id, post_id=post_id))
-        await self.session.commit()
+        # exists() 이후 다른 요청이 먼저 추가해도 unique 예외가 나지 않게 한다.
+        stmt = (
+            pg_insert(Like)
+            .values(
+                user_id=user_id,
+                post_id=post_id,
+                created_at=datetime.now(timezone.utc),
+            )
+            .on_conflict_do_nothing(constraint="uq_likes_user_post")
+        )
+        async with _write_transaction(self.session):
+            await self.session.execute(stmt)
 
     async def remove(self, user_id: int, post_id: int) -> None:
-        await self.session.execute(
-            sa_delete(Like).where(Like.user_id == user_id, Like.post_id == post_id)
-        )
-        await self.session.commit()
+        async with _write_transaction(self.session):
+            await self.session.execute(
+                sa_delete(Like).where(
+                    Like.user_id == user_id,
+                    Like.post_id == post_id,
+                )
+            )
