@@ -23,14 +23,16 @@ repository 패턴 적용
 2026-07-26
 조회수 (IP별 Redis 중복 방지, 삭제 글 제외)
 좋아요 토글 (likes 테이블, 매번 COUNT)
+
+2026-07-28
+게시글 수정 요청 스키마 검증
 '''
 
-from fastapi import APIRouter, Depends, HTTPException, Body, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from datetime import datetime, timezone
-from typing import Optional
 from ..database.repository import PostRepository, CategoryRepository, LikeRepository
 from ..database.orm import Post, User
-from ..schema.request import PostCreate, PostCategoryUpdate
+from ..schema.request import PostCreate, PostUpdate, PostCategoryUpdate
 from ..schema.response import (
     ListPostSchema, PostListItemSchema, PostDetailSchema,
     UserBriefSchema, CategorySchema, LikeResultSchema,
@@ -145,8 +147,7 @@ async def create_post_handler(
 @router.patch("/page/{id}", status_code=200, response_model=PostDetailSchema)#본문 수정
 async def update_post_handler(
     id: int,
-    title: Optional[str] = Body(None, embed=True),
-    contents: Optional[str] = Body(None, embed=True),
+    request: PostUpdate,
     # 수정은 새 내용을 만드는 일이므로 제재 중엔 막는다.
     # 권한이 꺼져도 이미 쓴 글은 고칠 수 있게 소유권만 본다
     current_user: User = Depends(get_active_user),
@@ -159,11 +160,12 @@ async def update_post_handler(
     if post.user_id != current_user.id and not current_user.can_manage_post:
         raise HTTPException(status_code=403, detail="not your post")
 
-    if title is not None:
-        post.title = title
-    if contents is not None:
-        post.contents = contents
-        post.thumbnail_url = extract_first_image(contents)   # 본문이 바뀌면 썸네일도
+    if request.title is not None:
+        post.title = request.title
+    if request.contents is not None:
+        post.contents = request.contents
+        # 본문이 바뀌면 썸네일도 다시 계산한다.
+        post.thumbnail_url = extract_first_image(request.contents)
     post.updated_at = datetime.now(timezone.utc)
     post = await post_repo.update(post)
 

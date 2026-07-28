@@ -11,6 +11,9 @@
 분류 반영 / 이미지 제거
 대댓글 (1단계) 및 삭제 자리표시자
 권한 체크박스 반영
+
+2026-07-28
+댓글 생성·수정 입력 검증
 '''
 
 from datetime import datetime, timedelta, timezone
@@ -151,6 +154,55 @@ def test_create_comment_post_not_found(auth_client, mock_post_repo, mock_comment
     mock_comment_repo.save.assert_not_called()      # 저장 시도조차 안 했나
 
 
+
+def test_create_comment_accepts_5000_characters(
+    auth_client,
+    mock_post_repo,
+    mock_comment_repo,
+):
+    """댓글은 5,000자까지 허용한다."""
+    mock_post_repo.get_post_by_id.return_value = _make_post()
+    mock_comment_repo.save.return_value = _make_comment(contents="a" * 5_000)
+
+    response = auth_client.post(
+        "/page/1/comment",
+        json={"contents": "a" * 5_000},
+    )
+
+    assert response.status_code == 201
+    mock_comment_repo.save.assert_called_once()
+
+
+def test_create_comment_rejects_blank(
+    auth_client,
+    mock_post_repo,
+    mock_comment_repo,
+):
+    response = auth_client.post(
+        "/page/1/comment",
+        json={"contents": " \n\t "},
+    )
+
+    assert response.status_code == 422
+    mock_post_repo.get_post_by_id.assert_not_called()
+    mock_comment_repo.save.assert_not_called()
+
+
+def test_create_comment_rejects_over_5000(
+    auth_client,
+    mock_post_repo,
+    mock_comment_repo,
+):
+    response = auth_client.post(
+        "/page/1/comment",
+        json={"contents": "a" * 5_001},
+    )
+
+    assert response.status_code == 422
+    mock_post_repo.get_post_by_id.assert_not_called()
+    mock_comment_repo.save.assert_not_called()
+
+
 # ---------- 수정 ----------
 
 def test_update_comment(auth_client, mock_comment_repo):
@@ -190,6 +242,52 @@ def test_update_comment_not_found(auth_client, mock_comment_repo):
     response = auth_client.patch("/comment/999", json={"contents": "수정"})
 
     assert response.status_code == 404
+
+
+
+def test_update_comment_accepts_5000_characters(
+    auth_client,
+    mock_comment_repo,
+):
+    comment = _make_comment(user_id=1)
+    mock_comment_repo.get_comment_by_id.return_value = comment
+    mock_comment_repo.update.return_value = comment
+
+    response = auth_client.patch(
+        "/comment/1",
+        json={"contents": "a" * 5_000},
+    )
+
+    assert response.status_code == 200
+    assert len(response.json()["contents"]) == 5_000
+
+
+def test_update_comment_rejects_blank(
+    auth_client,
+    mock_comment_repo,
+):
+    response = auth_client.patch(
+        "/comment/1",
+        json={"contents": " \n\t "},
+    )
+
+    assert response.status_code == 422
+    mock_comment_repo.get_comment_by_id.assert_not_called()
+    mock_comment_repo.update.assert_not_called()
+
+
+def test_update_comment_rejects_over_5000(
+    auth_client,
+    mock_comment_repo,
+):
+    response = auth_client.patch(
+        "/comment/1",
+        json={"contents": "a" * 5_001},
+    )
+
+    assert response.status_code == 422
+    mock_comment_repo.get_comment_by_id.assert_not_called()
+    mock_comment_repo.update.assert_not_called()
 
 
 # ---------- 삭제 ----------

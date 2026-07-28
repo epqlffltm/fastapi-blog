@@ -14,13 +14,16 @@ repository 패턴 적용
 
 2026-07-27
 async 전환 (await) / 저장 후 fresh 재조회로 새 댓글 즉시 반영
+
+2026-07-28
+댓글 생성·수정 입력 검증
 '''
 
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime, timezone
 from ..database.repository import PostRepository, CommentRepository
 from ..database.orm import Comment, User
-from ..schema.request import CommentCreate
+from ..schema.request import CommentCreate, CommentUpdate
 from ..schema.response import PostDetailSchema
 from ..service.comment import visible_comments
 from .dependency import get_current_user, get_active_user, require_permission
@@ -63,7 +66,7 @@ async def create_comment_handler(
 @router.patch("/comment/{id}", status_code=200)#댓글 수정
 async def update_comment_handler(
     id: int,
-    contents: str = Body(..., embed=True),
+    request: CommentUpdate,
     # 수정은 새 내용을 만드는 일이므로 제재 중엔 막는다
     current_user: User = Depends(get_active_user),
     comment_repo: CommentRepository = Depends(),
@@ -74,7 +77,7 @@ async def update_comment_handler(
     if comment.user_id != current_user.id:      # 내 댓글만 수정 가능
         raise HTTPException(status_code=403, detail="not your comment")
 
-    comment.contents = contents
+    comment.contents = request.contents
     comment.updated_at = datetime.now(timezone.utc)
     comment = await comment_repo.update(comment)
     return {"id": comment.id, "contents": comment.contents}

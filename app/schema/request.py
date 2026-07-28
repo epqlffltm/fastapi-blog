@@ -19,41 +19,102 @@ nickname 제거 (작성자는 토큰에서)
 
 2026-07-26
 프로필 수정(닉네임·소개)
+
+2026-07-28
+게시글 수정 / 댓글 생성·수정 입력 검증
 '''
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
-class ContentCreate(BaseModel):
-    contents: str
+POST_TITLE_MAX_LENGTH = 200
+POST_CONTENTS_MAX_LENGTH = 100_000
+COMMENT_CONTENTS_MAX_LENGTH = 5_000
 
 
-class PostCreate(ContentCreate):
-    title: str = Field(min_length=1, max_length=200)
-    contents: str = Field(min_length=1, max_length=100_000)
+def _normalize_title(value: str | None) -> str | None:
+    """제목 앞뒤 공백을 제거하고 공백만 있는 입력을 거부한다."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = value.strip()
+    if not value:
+        raise ValueError("title must not be blank")
+    return value
+
+
+def _validate_contents(value: str | None) -> str | None:
+    """본문 형식은 보존하되 공백 문자만 있는 입력을 거부한다."""
+    if value is None:
+        return None
+    if not value.strip():
+        raise ValueError("contents must not be blank")
+    return value
+
+
+class PostCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=POST_TITLE_MAX_LENGTH)
+    contents: str = Field(min_length=1, max_length=POST_CONTENTS_MAX_LENGTH)
     category_id: int
 
     @field_validator("title", mode="before")
     @classmethod
     def normalize_title(cls, value: str) -> str:
-        # 제목 앞뒤 공백은 저장하지 않고, 공백만 있는 제목은 거부한다
-        if isinstance(value, str):
-            value = value.strip()
-        if not value:
-            raise ValueError("title must not be blank")
-        return value
+        return _normalize_title(value)
 
     @field_validator("contents")
     @classmethod
     def validate_contents(cls, value: str) -> str:
-        # 마크다운 원문은 보존하되 공백만 있는 본문은 거부한다
-        if not value.strip():
-            raise ValueError("contents must not be blank")
-        return value
+        return _validate_contents(value)
 
 
-class CommentCreate(ContentCreate):
+class PostUpdate(BaseModel):
+    # PATCH 요청이므로 둘 다 선택값. 전달된 필드에는 생성과 같은 정책을 적용한다.
+    title: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=POST_TITLE_MAX_LENGTH,
+    )
+    contents: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=POST_CONTENTS_MAX_LENGTH,
+    )
+
+    @field_validator("title", mode="before")
+    @classmethod
+    def normalize_title(cls, value: str | None) -> str | None:
+        return _normalize_title(value)
+
+    @field_validator("contents")
+    @classmethod
+    def validate_contents(cls, value: str | None) -> str | None:
+        return _validate_contents(value)
+
+
+class CommentCreate(BaseModel):
+    contents: str = Field(
+        min_length=1,
+        max_length=COMMENT_CONTENTS_MAX_LENGTH,
+    )
     parent_id: int | None = None     # 없으면 원댓글, 있으면 그 댓글의 답글
+
+    @field_validator("contents")
+    @classmethod
+    def validate_contents(cls, value: str) -> str:
+        return _validate_contents(value)
+
+
+class CommentUpdate(BaseModel):
+    contents: str = Field(
+        min_length=1,
+        max_length=COMMENT_CONTENTS_MAX_LENGTH,
+    )
+
+    @field_validator("contents")
+    @classmethod
+    def validate_contents(cls, value: str) -> str:
+        return _validate_contents(value)
 
 
 class SignUpRequest(BaseModel):

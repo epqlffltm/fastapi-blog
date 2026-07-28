@@ -10,6 +10,9 @@
 2026-07-24
 분류 반영 / 이미지 제거 / 썸네일
 권한 체크박스 반영
+
+2026-07-28
+게시글 수정 입력 검증
 '''
 
 from datetime import datetime, timezone
@@ -18,7 +21,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.database.orm import Post, User, Category
-from app.schema.request import PostCreate
+from app.schema.request import PostCreate, PostUpdate
 
 
 def _make_user(id=1, nickname="tester"):
@@ -67,6 +70,11 @@ def _make_post_request(**overrides):
     }
     data.update(overrides)
     return PostCreate(**data)
+
+
+def _make_post_update(**overrides):
+    """PostUpdate 스키마 검증용 요청 객체 생성 헬퍼"""
+    return PostUpdate(**overrides)
 
 
 # ---------- 목록 조회 ----------
@@ -342,6 +350,41 @@ def test_update_post_not_found(auth_client, mock_post_repo):
     response = auth_client.patch("/page/999", json={"title": "수정"})
 
     assert response.status_code == 404
+
+
+
+def test_post_update_accepts_boundaries():
+    """수정도 생성과 같은 길이 경계를 허용한다."""
+    assert _make_post_update(title="a").title == "a"
+    assert len(_make_post_update(title="a" * 200).title) == 200
+    assert _make_post_update(contents="a").contents == "a"
+    assert len(_make_post_update(contents="a" * 100_000).contents) == 100_000
+
+
+def test_post_update_strips_title_edges():
+    """수정 제목도 앞뒤 공백을 제거한다."""
+    assert _make_post_update(title="  수정 제목  ").title == "수정 제목"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"title": "   "},
+        {"title": "a" * 201},
+        {"contents": " \n\t "},
+        {"contents": "a" * 100_001},
+    ],
+)
+def test_update_post_rejects_invalid_payload(
+    auth_client,
+    mock_post_repo,
+    payload,
+):
+    response = auth_client.patch("/page/1", json=payload)
+
+    assert response.status_code == 422
+    mock_post_repo.get_post_by_id.assert_not_called()
+    mock_post_repo.update.assert_not_called()
 
 
 # ---------- 삭제 ----------
