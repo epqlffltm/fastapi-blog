@@ -184,8 +184,8 @@ class OTPService:
         end
 
         if new_attempts >= max_attempts then
-            # 한도에 도달하면 정답 코드도 폐기한다. attempts_key는 남은 TTL 동안
-            # 유지해 이후 요청도 명확하게 차단한다.
+            -- 한도에 도달하면 정답 코드도 폐기한다. attempts_key는 남은 TTL 동안
+            -- 유지해 이후 요청도 명확하게 차단한다.
             redis.call("DEL", otp_key)
             return -2
         end
