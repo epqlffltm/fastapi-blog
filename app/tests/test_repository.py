@@ -14,7 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.orm import User
-from app.database.repository import LikeRepository, UserRepository
+from app.database.repository import LikeRepository, PostRepository, UserRepository
 
 
 def _make_user() -> User:
@@ -42,6 +42,7 @@ def _mock_session() -> AsyncMock:
     session.rollback = AsyncMock()
     session.refresh = AsyncMock()
     session.execute = AsyncMock()
+    session.scalar = AsyncMock()
     return session
 
 
@@ -80,3 +81,44 @@ async def test_like_add_uses_on_conflict_do_nothing():
     assert "ON CONFLICT ON CONSTRAINT uq_likes_user_post DO NOTHING" in sql
     session.commit.assert_awaited_once()
     session.rollback.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_get_posts_uses_aggregate_query_and_searches_all_fields():
+    """목록은 페이지당 집계 쿼리 1회이며 제목·본문·작성자를 함께 검색한다."""
+    session = _mock_session()
+    result = Mock()
+    result.all.return_value = []
+    session.execute.return_value = result
+    session.scalar.return_value = 0
+    repo = PostRepository(session=session)
+
+    rows, total = await repo.get_posts(
+        order="desc",
+        page=2,
+        size=20,
+        query="fastapi",
+        category_id=3,
+        user_id=None,
+        include_deleted=False,
+    )
+
+    assert rows == []
+    assert total == 0
+    session.execute.assert_awaited_once()
+    session.scalar.assert_awaited_once()
+
+    statement = session.execute.await_args.args[0]
+    sql = str(
+        statement.compile(
+            dialect=postgresql.dialect(),
+            compile_kwargs={"literal_binds": True},
+        )
+    )
+
+    assert "comments" in sql
+    assert "likes" in sql
+    assert "posts.title" in sql
+    assert "posts.contents" in sql
+    assert "users.nickname" in sql
+    assert "LIMIT 20 OFFSET 20" in sql

@@ -14,6 +14,9 @@ get 단일 조회 api
 이미지 스키마 제거 / 목록에 썸네일 추가
 대댓글 (parent_id) 및 삭제 자리표시자
 권한 · 제재
+
+2026-07-28
+게시글 목록 페이지 정보 추가
 '''
 
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -68,6 +71,10 @@ class PostListItemSchema(BaseModel):
 # 목록 전체
 class ListPostSchema(BaseModel):
     posts: list[PostListItemSchema]
+    page: int
+    size: int
+    total: int
+    total_pages: int
 
 
 # 댓글 하나

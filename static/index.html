@@ -23,6 +23,24 @@
         <section>
             <ul class="post-list" id="post-list"></ul>
             <p class="empty" id="empty" hidden>아직 글이 없습니다.</p>
+
+            <form class="post-search" id="post-search" role="search">
+                <label for="post-search-input">게시글 검색</label>
+                <div class="post-search-controls">
+                    <input
+                        id="post-search-input"
+                        name="q"
+                        type="search"
+                        maxlength="100"
+                        placeholder="제목, 본문, 글쓴이 검색"
+                        autocomplete="off"
+                    >
+                    <button type="submit">검색</button>
+                    <button type="button" id="post-search-clear" hidden>초기화</button>
+                </div>
+            </form>
+
+            <nav class="pagination" id="pagination" aria-label="게시글 페이지"></nav>
         </section>
     </main>
 

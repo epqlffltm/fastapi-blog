@@ -26,10 +26,12 @@ repository 패턴 적용
 
 2026-07-28
 게시글 수정 요청 스키마 검증
+게시글 목록 페이지네이션 / 제목·본문·작성자 검색 / N+1 제거
 '''
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from datetime import datetime, timezone
+from typing import Literal
 from ..database.repository import PostRepository, CategoryRepository, LikeRepository
 from ..database.orm import Post, User
 from ..schema.request import PostCreate, PostUpdate, PostCategoryUpdate
@@ -54,14 +56,16 @@ VIEW_DEDUP_TTL_SECONDS = 60 * 60 * 6   # 6시간
 
 @router.get("/pages", status_code=200, response_model=ListPostSchema)#글 목록 보기
 async def get_pages_handler(
-    order: str = "random",
+    order: Literal["asc", "desc", "random"] = "desc",
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=20, ge=1, le=100),
+    q: str | None = Query(default=None, max_length=100),
     category: str | None = None,
     author: int | None = None,          # 특정 작성자의 글만 (프로필용)
     # 비로그인도 허용. 관리자면 삭제 글까지 본다
     viewer: User | None = Depends(get_current_user_optional),
     post_repo: PostRepository = Depends(),
     category_repo: CategoryRepository = Depends(),
-    like_repo: LikeRepository = Depends(),
 ):
     category_id = None
     if category is not None:
@@ -70,32 +74,45 @@ async def get_pages_handler(
             raise HTTPException(status_code=404, detail="category not found")
         category_id = found.id
 
+    # 빈 검색어는 검색하지 않은 것과 같게 처리한다.
+    query = q.strip() if q and q.strip() else None
+
     # 관리자(글 관리 권한)만 삭제된 글도 목록에서 본다
     include_deleted = viewer is not None and viewer.can_manage_post
-    posts = await post_repo.get_posts(
-        order=order.lower(), category_id=category_id,
-        user_id=author, include_deleted=include_deleted
+    rows, total = await post_repo.get_posts(
+        order=order,
+        page=page,
+        size=size,
+        query=query,
+        category_id=category_id,
+        user_id=author,
+        include_deleted=include_deleted,
     )
 
-    result = []
-    for post in posts:
-        comment_count = await post_repo.count_comments(post.id)
-        result.append(
-            PostListItemSchema(
-                id=post.id,
-                title=post.title,
-                user=UserBriefSchema.model_validate(post.user),
-                category=CategorySchema.model_validate(post.category),
-                thumbnail_url=post.thumbnail_url,
-                created_at=post.created_at,
-                comment_count=comment_count,
-                is_deleted=post.is_deleted,
-                view_count=post.view_count,
-                like_count=await like_repo.count_for_post(post.id),
-            )
+    result = [
+        PostListItemSchema(
+            id=post.id,
+            title=post.title,
+            user=UserBriefSchema.model_validate(post.user),
+            category=CategorySchema.model_validate(post.category),
+            thumbnail_url=post.thumbnail_url,
+            created_at=post.created_at,
+            comment_count=comment_count,
+            is_deleted=post.is_deleted,
+            view_count=post.view_count,
+            like_count=like_count,
         )
+        for post, comment_count, like_count in rows
+    ]
 
-    return ListPostSchema(posts=result)
+    total_pages = (total + size - 1) // size
+    return ListPostSchema(
+        posts=result,
+        page=page,
+        size=size,
+        total=total,
+        total_pages=total_pages,
+    )
 
 
 @router.get("/page/{id}", status_code=200, response_model=PostDetailSchema)#글 읽기

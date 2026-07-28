@@ -275,7 +275,7 @@ def test_suspended_cannot_write_post(suspended_client, mock_post_repo, mock_cate
 
 def test_suspended_can_read(suspended_client, mock_post_repo, mock_category_repo):
     """읽기는 제재와 무관하다"""
-    mock_post_repo.get_posts.return_value = []
+    mock_post_repo.get_posts.return_value = ([], 0)
 
     response = suspended_client.get("/pages")
 

@@ -80,10 +80,9 @@ def _make_post_update(**overrides):
 # ---------- 목록 조회 ----------
 
 def test_get_pages(client, mock_post_repo, mock_category_repo, mock_like_repo):
-    mock_post_repo.get_posts.return_value = [_make_post(thumbnail_url="/img/a.png")]
-    mock_post_repo.count_comments.return_value = 2
-    mock_like_repo.count_for_post.return_value = 5
-    
+    post = _make_post(thumbnail_url="/img/a.png")
+    mock_post_repo.get_posts.return_value = ([(post, 2, 5)], 1)
+
     response = client.get("/pages")
 
     assert response.status_code == 200
@@ -96,13 +95,19 @@ def test_get_pages(client, mock_post_repo, mock_category_repo, mock_like_repo):
     assert data["posts"][0]["comment_count"] == 2
     assert data["posts"][0]["like_count"] == 5
     assert data["posts"][0]["view_count"] == 0
+    assert data["page"] == 1
+    assert data["size"] == 20
+    assert data["total"] == 1
+    assert data["total_pages"] == 1
+
+    # 댓글·좋아요 수는 repository의 집계 쿼리 결과를 사용한다.
+    mock_post_repo.count_comments.assert_not_called()
+    mock_like_repo.count_for_post.assert_not_called()
 
 
-def test_get_pages_without_thumbnail(client, mock_post_repo, mock_category_repo, mock_like_repo):
+def test_get_pages_without_thumbnail(client, mock_post_repo, mock_category_repo):
     """이미지 없는 글은 썸네일이 null"""
-    mock_post_repo.get_posts.return_value = [_make_post()]
-    mock_post_repo.count_comments.return_value = 0
-    mock_like_repo.count_for_post.return_value = 0
+    mock_post_repo.get_posts.return_value = ([(_make_post(), 0, 0)], 1)
 
     response = client.get("/pages")
 
@@ -111,31 +116,94 @@ def test_get_pages_without_thumbnail(client, mock_post_repo, mock_category_repo,
 
 
 def test_get_pages_empty(client, mock_post_repo, mock_category_repo):
-    mock_post_repo.get_posts.return_value = []
+    mock_post_repo.get_posts.return_value = ([], 0)
 
     response = client.get("/pages")
 
     assert response.status_code == 200
-    assert response.json()["posts"] == []
+    assert response.json() == {
+        "posts": [],
+        "page": 1,
+        "size": 20,
+        "total": 0,
+        "total_pages": 0,
+    }
 
 
 def test_get_pages_order_asc(client, mock_post_repo, mock_category_repo):
     """정렬 파라미터가 repository에 전달되는지"""
-    mock_post_repo.get_posts.return_value = []
+    mock_post_repo.get_posts.return_value = ([], 0)
 
     client.get("/pages?order=asc")
 
-    mock_post_repo.get_posts.assert_called_once_with(order="asc", category_id=None, user_id=None, include_deleted=False)
+    mock_post_repo.get_posts.assert_awaited_once_with(
+        order="asc",
+        page=1,
+        size=20,
+        query=None,
+        category_id=None,
+        user_id=None,
+        include_deleted=False,
+    )
 
 
 def test_get_pages_filtered_by_category(client, mock_post_repo, mock_category_repo):
     mock_category_repo.get_category_by_slug.return_value = _make_category(id=7)
-    mock_post_repo.get_posts.return_value = []
+    mock_post_repo.get_posts.return_value = ([], 0)
 
     response = client.get("/pages?category=dnd&order=desc")
 
     assert response.status_code == 200
-    mock_post_repo.get_posts.assert_called_once_with(order="desc", category_id=7, user_id=None, include_deleted=False)
+    mock_post_repo.get_posts.assert_awaited_once_with(
+        order="desc",
+        page=1,
+        size=20,
+        query=None,
+        category_id=7,
+        user_id=None,
+        include_deleted=False,
+    )
+
+
+def test_get_pages_search_and_pagination(client, mock_post_repo, mock_category_repo):
+    """검색어와 페이지 정보가 repository에 전달된다."""
+    mock_post_repo.get_posts.return_value = ([], 27)
+
+    response = client.get("/pages?q=%20fastapi%20&page=2&size=10")
+
+    assert response.status_code == 200
+    assert response.json()["total"] == 27
+    assert response.json()["total_pages"] == 3
+    mock_post_repo.get_posts.assert_awaited_once_with(
+        order="desc",
+        page=2,
+        size=10,
+        query="fastapi",
+        category_id=None,
+        user_id=None,
+        include_deleted=False,
+    )
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/pages?page=0",
+        "/pages?size=0",
+        "/pages?size=101",
+        f"/pages?q={'a' * 101}",
+        "/pages?order=unknown",
+    ],
+)
+def test_get_pages_rejects_invalid_query(
+    client,
+    mock_post_repo,
+    path,
+):
+    response = client.get(path)
+
+    assert response.status_code == 422
+    mock_post_repo.get_posts.assert_not_called()
 
 
 def test_get_pages_unknown_category(client, mock_post_repo, mock_category_repo):
@@ -431,18 +499,34 @@ def test_delete_post_not_found(auth_client, mock_post_repo):
     
 def test_admin_sees_deleted_posts_in_list(admin_viewer, mock_post_repo, mock_category_repo):
     """관리자는 삭제된 글도 목록에서 본다"""
-    mock_post_repo.get_posts.return_value = []
+    mock_post_repo.get_posts.return_value = ([], 0)
+
     admin_viewer.get("/pages?order=desc")
-    mock_post_repo.get_posts.assert_called_once_with(
-        order="desc", category_id=None, user_id=None, include_deleted=True
+
+    mock_post_repo.get_posts.assert_awaited_once_with(
+        order="desc",
+        page=1,
+        size=20,
+        query=None,
+        category_id=None,
+        user_id=None,
+        include_deleted=True,
     )
 
 
 def test_anonymous_does_not_see_deleted_posts(client, mock_post_repo, mock_category_repo):
-    mock_post_repo.get_posts.return_value = []
+    mock_post_repo.get_posts.return_value = ([], 0)
+
     client.get("/pages?order=desc")
-    mock_post_repo.get_posts.assert_called_once_with(
-        order="desc", category_id=None, user_id=None, include_deleted=False
+
+    mock_post_repo.get_posts.assert_awaited_once_with(
+        order="desc",
+        page=1,
+        size=20,
+        query=None,
+        category_id=None,
+        user_id=None,
+        include_deleted=False,
     )
 
 

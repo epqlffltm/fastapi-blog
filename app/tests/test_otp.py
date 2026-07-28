@@ -121,7 +121,7 @@ def test_unverified_cannot_create_comment(unverified_client, mock_post_repo, moc
 
 def test_unverified_can_read(unverified_client, mock_post_repo, mock_category_repo):
     """읽기는 인증 없이도 가능"""
-    mock_post_repo.get_posts.return_value = []
+    mock_post_repo.get_posts.return_value = ([], 0)
 
     response = unverified_client.get("/pages")
 

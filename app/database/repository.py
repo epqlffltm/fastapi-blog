@@ -26,13 +26,16 @@ LikeRepository (좋아요 추가/삭제/카운트/존재확인)
 
 2026-07-28
 쓰기 작업 실패 시 rollback / 좋아요 중복 INSERT 원자 처리
+
+2026-07-28
+게시글 목록 페이지네이션 / 검색 / 댓글·좋아요 집계
 '''
 
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from fastapi import Depends
-from sqlalchemy import select, func, update as sa_update, delete as sa_delete
+from sqlalchemy import select, func, or_, update as sa_update, delete as sa_delete
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from .connection import get_db
@@ -55,24 +58,97 @@ class PostRepository:
         self.session = session
 
     async def get_posts(
-        self, order: str, category_id: int | None = None,
-        user_id: int | None = None, include_deleted: bool = False
-    ) -> list[Post]:
-        stmt = select(Post)
+        self,
+        order: str,
+        page: int,
+        size: int,
+        query: str | None = None,
+        category_id: int | None = None,
+        user_id: int | None = None,
+        include_deleted: bool = False,
+    ) -> tuple[list[tuple[Post, int, int]], int]:
+        """페이지 글과 댓글·좋아요 수를 함께 조회하고 전체 결과 수를 반환한다."""
+        comment_counts = (
+            select(
+                Comment.post_id.label("post_id"),
+                func.count(Comment.id).label("comment_count"),
+            )
+            .where(Comment.is_deleted.is_(False))
+            .group_by(Comment.post_id)
+            .subquery()
+        )
+        like_counts = (
+            select(
+                Like.post_id.label("post_id"),
+                func.count(Like.id).label("like_count"),
+            )
+            .group_by(Like.post_id)
+            .subquery()
+        )
+
+        filters = []
         if not include_deleted:
-            stmt = stmt.where(Post.is_deleted == False)
+            filters.append(Post.is_deleted.is_(False))
         if category_id is not None:
-            stmt = stmt.where(Post.category_id == category_id)
-        if user_id is not None:                       # 특정 작성자의 글만 (프로필용)
-            stmt = stmt.where(Post.user_id == user_id)
+            filters.append(Post.category_id == category_id)
+        if user_id is not None:
+            filters.append(Post.user_id == user_id)
+        if query:
+            # %, _가 검색 와일드카드로 해석되지 않고 문자 그대로 검색되게 한다.
+            escaped = (
+                query.replace("\\", "\\\\")
+                .replace("%", "\\%")
+                .replace("_", "\\_")
+            )
+            pattern = f"%{escaped}%"
+            filters.append(
+                or_(
+                    Post.title.ilike(pattern, escape="\\"),
+                    Post.contents.ilike(pattern, escape="\\"),
+                    Post.user.has(
+                        User.nickname.ilike(pattern, escape="\\")
+                    ),
+                )
+            )
+
+        total = await self.session.scalar(
+            select(func.count(Post.id)).where(*filters)
+        )
+
+        stmt = (
+            select(
+                Post,
+                func.coalesce(comment_counts.c.comment_count, 0).label(
+                    "comment_count"
+                ),
+                func.coalesce(like_counts.c.like_count, 0).label("like_count"),
+            )
+            .outerjoin(
+                comment_counts,
+                comment_counts.c.post_id == Post.id,
+            )
+            .outerjoin(
+                like_counts,
+                like_counts.c.post_id == Post.id,
+            )
+            .where(*filters)
+        )
+
         if order == "asc":
-            stmt = stmt.order_by(Post.created_at.asc())
-        elif order == "desc":
-            stmt = stmt.order_by(Post.created_at.desc())
-        else:
+            stmt = stmt.order_by(Post.created_at.asc(), Post.id.asc())
+        elif order == "random":
             stmt = stmt.order_by(func.random())
-        result = await self.session.scalars(stmt)
-        return list(result.all())
+        else:
+            stmt = stmt.order_by(Post.created_at.desc(), Post.id.desc())
+
+        stmt = stmt.offset((page - 1) * size).limit(size)
+        result = await self.session.execute(stmt)
+
+        rows = [
+            (row[0], int(row[1]), int(row[2]))
+            for row in result.all()
+        ]
+        return rows, int(total or 0)
 
     async def get_post_by_id(
         self, id: int, include_deleted: bool = False, fresh: bool = False
