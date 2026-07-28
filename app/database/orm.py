@@ -166,8 +166,12 @@ class User(Base):    # 회원 테이블
     suspended_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     is_banned: Mapped[bool] = mapped_column(default=False)
 
-    posts: Mapped[list["Post"]] = relationship(back_populates="user", lazy="selectin")
-    comments: Mapped[list["Comment"]] = relationship(back_populates="user", lazy="selectin")
+    # back_populates 를 위한 역방향일 뿐, 코드에서 한 번도 읽지 않는다.
+    # selectin 이면 User 를 한 명 읽을 때마다 그 사람의 글·댓글을 전부 끌고 오고,
+    # 글은 다시 user·category 를 joined 로 물어 연쇄가 된다 (로그인 상태의 모든 요청에서).
+    # raise 로 두면 실수로 접근하는 순간 조용한 쿼리 폭주 대신 예외로 드러난다
+    posts: Mapped[list["Post"]] = relationship(back_populates="user", lazy="raise")
+    comments: Mapped[list["Comment"]] = relationship(back_populates="user", lazy="raise")
 
     def __repr__(self):
         return f"User(id={self.id}, email={self.email})"
@@ -219,7 +223,8 @@ class Category(Base):    # 글 분류 (사이드바)
     name: Mapped[str] = mapped_column(String(32), unique=True)              # 화면에 보이는 이름
     display_order: Mapped[int] = mapped_column(default=0)
 
-    posts: Mapped[list["Post"]] = relationship(back_populates="category", lazy="selectin")
+    # User 쪽과 같은 이유. 사이드바 글 수는 GROUP BY 로 따로 센다
+    posts: Mapped[list["Post"]] = relationship(back_populates="category", lazy="raise")
 
     def __repr__(self):
         return f"Category(id={self.id}, slug={self.slug})"

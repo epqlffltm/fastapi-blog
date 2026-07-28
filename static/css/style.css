@@ -672,6 +672,99 @@ select:focus { border-color: var(--accent); }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-faint); }
 
 
+/* ── 게시글 검색 · 페이지 ─────────────────────────────────── */
+
+/* 전역 form 이 column + max-width:380px 라서 검색줄이 세로로 쌓였다.
+   검색은 한 줄짜리 도구이므로 여기서만 되돌린다 */
+.post-search {
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+    max-width: none;
+    margin-top: 18px;
+}
+
+.post-search label {
+    flex: none;
+    white-space: nowrap;
+}
+
+.post-search-controls {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;    /* 안 주면 input 의 기본 최소너비 때문에 줄이 안 줄어든다 */
+}
+
+/* input 의 전역 width:100% 를 풀고 남는 폭을 먹게 한다 */
+.post-search-controls input {
+    flex: 1;
+    width: auto;
+    min-width: 0;
+}
+
+.post-search-controls button,
+.pagination button {
+    flex: none;
+    padding: 9px 16px;
+    background: var(--bg-raised);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.post-search-controls button:hover,
+.pagination button:hover:not(:disabled) { border-color: var(--accent); }
+
+/* 검색이 이 줄의 주행동 → 액센트는 여기 하나만 */
+.post-search-controls button[type="submit"] {
+    background: var(--accent);
+    color: var(--bg);
+    border-color: var(--accent);
+}
+
+.post-search-controls button[type="submit"]:hover {
+    background: var(--accent-hi);
+    border-color: var(--accent-hi);
+}
+
+.post-search-controls button[type="submit"]:active { background: var(--accent-down); }
+
+.pagination {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 16px;
+}
+
+/* 개수·페이지 번호는 기계가 낸 숫자 → 모노 (규칙 1) */
+.pagination-summary,
+.pagination-status {
+    color: var(--text-dim);
+    font-family: var(--mono);
+    font-size: 12px;
+}
+
+.pagination button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* 분류를 못 불러왔을 때. 비어 있는 상태와 실패를 눈으로 구분한다 */
+.category-list .load-error {
+    padding: 8px 10px;
+    color: var(--warn);
+    font-size: 12px;
+    word-break: keep-all;
+}
+
+
 /* ── 좁은 화면 ──────────────────────────────────────────── */
 
 @media (max-width: 700px) {
@@ -705,6 +798,14 @@ select:focus { border-color: var(--accent); }
 
     /* 커서가 없으므로 미리보기도 의미가 없다 */
     .hover-preview { display: none !important; }
+
+    /* 폭이 모자라면 라벨만 윗줄로. 입력+버튼은 계속 한 줄 */
+    .post-search {
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+
+    .post-search-controls { flex-basis: 100%; }
 }
 
 

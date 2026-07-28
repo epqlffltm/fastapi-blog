@@ -38,6 +38,7 @@ from fastapi import Depends
 from sqlalchemy import select, func, or_, update as sa_update, delete as sa_delete
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import noload
 from .connection import get_db
 from .orm import Post, Comment, Upload, User, Category, Like
 
@@ -132,6 +133,9 @@ class PostRepository:
                 like_counts.c.post_id == Post.id,
             )
             .where(*filters)
+            # 목록에는 댓글 본문이 필요 없다 (수는 위 서브쿼리로 이미 셌다).
+            # 막지 않으면 Post.comments 의 selectin 이 20개 글의 댓글을 통째로 더 읽는다
+            .options(noload(Post.comments))
         )
 
         if order == "asc":

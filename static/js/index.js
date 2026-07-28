@@ -121,8 +121,16 @@ async function loadCategories() {
         for (const category of data.categories) {
             list.append(createCategoryItem(category));
         }
-    } catch {
-        // 분류를 못 불러와도 글 목록은 보여야 하므로 조용히 넘어간다.
+    } catch (error) {
+        // 분류를 못 불러와도 글 목록은 보여야 하므로 여기서 멈추지는 않는다.
+        // 다만 조용히 삼키면 "사이드바가 그냥 비어 있는" 상태와 구분이 안 된다.
+        // 실패했다는 사실은 화면과 콘솔 양쪽에 남긴다
+        console.error("category load failed:", error);
+
+        const li = document.createElement("li");
+        li.className = "load-error";
+        li.textContent = error?.message || "분류를 불러오지 못했습니다.";
+        list.replaceChildren(li);
     }
 }
 
@@ -389,14 +397,18 @@ function attachPreview(li, url) {
 
 
 // 검색 UI가 없는 이전 HTML도 먼저 보완한다.
-ensureListControls();
-
-// 헤더 로딩 실패가 게시글 목록 로딩을 막지 않게 분리한다.
+// 여기서 예외가 그대로 올라가면 아래 목록 로딩까지 통째로 죽는다
 try {
-    renderHeader();
+    ensureListControls();
 } catch (error) {
-    console.error("header render failed:", error);
+    console.error("list controls setup failed:", error);
 }
+
+// renderHeader 는 async 라 try/catch 로는 안 잡힌다 (동기 구간에서 끝나 버린다).
+// 실패는 반환된 Promise 로 오므로 catch 를 붙여야 한다
+renderHeader().catch((error) => {
+    console.error("header render failed:", error);
+});
 
 setupSearch();
 loadCategories();
