@@ -22,14 +22,26 @@ nickname 제거 (작성자는 토큰에서)
 
 2026-07-28
 게시글 수정 / 댓글 생성·수정 입력 검증
+bcrypt 비밀번호 UTF-8 바이트 길이 검증
 '''
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from typing import Annotated
+
+from pydantic import AfterValidator, BaseModel, EmailStr, Field, field_validator
+
+from ..service.password import validate_bcrypt_password_length
 
 
 POST_TITLE_MAX_LENGTH = 200
 POST_CONTENTS_MAX_LENGTH = 100_000
 COMMENT_CONTENTS_MAX_LENGTH = 5_000
+
+# Pydantic max_length는 문자 수를 검사하지만 bcrypt 제한은 UTF-8 바이트 수다.
+NewPassword = Annotated[
+    str,
+    Field(min_length=8),
+    AfterValidator(validate_bcrypt_password_length),
+]
 
 
 def _normalize_title(value: str | None) -> str | None:
@@ -119,12 +131,13 @@ class CommentUpdate(BaseModel):
 
 class SignUpRequest(BaseModel):
     email: EmailStr
-    password: str = Field(min_length=8, max_length=72)   # bcrypt 72바이트 제한
+    password: NewPassword
     nickname: str = Field(min_length=2, max_length=20)
 
 
 class LogInRequest(BaseModel):
     # 로그인엔 길이 제한을 걸지 않는다. 정책이 바뀌면 기존 회원이 갇힌다
+    # bcrypt 한도를 넘는 입력은 AuthService에서 일반 인증 실패로 처리한다.
     email: EmailStr
     password: str
 
@@ -140,7 +153,7 @@ class ResetPasswordRequest(BaseModel):
 class ResetPasswordVerifyRequest(BaseModel):
     email: EmailStr
     otp: int = Field(ge=100_000, le=999_999)
-    new_password: str = Field(min_length=8, max_length=72)
+    new_password: NewPassword
 
 
 class CategoryCreate(BaseModel):
@@ -186,5 +199,5 @@ class ProfileUpdateRequest(BaseModel):
 
 class PasswordChangeRequest(BaseModel):
     current_password: str                                     # 본인 확인용 (비번 유출 방어)
-    new_password: str = Field(min_length=8, max_length=72)   # bcrypt 72바이트 제한
+    new_password: NewPassword
     otp: int = Field(ge=100_000, le=999_999)                 # 이메일로 받은 6자리 (계정 탈취 방어)

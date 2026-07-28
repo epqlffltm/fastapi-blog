@@ -11,6 +11,7 @@ httpOnly 쿠키 로그인 / 로그아웃
 
 2026-07-28
 프로필 댓글 목록 API 추가
+bcrypt 해싱·검증을 thread pool로 이동
 '''
 
 from datetime import datetime, timedelta, timezone
@@ -57,7 +58,7 @@ async def sign_up_handler(
     if await user_repo.get_user_by_nickname(request.nickname) is not None:
         raise HTTPException(status_code=409, detail="nickname already exists")
 
-    hashed = auth_service.hash_password(request.password)
+    hashed = await auth_service.hash_password_async(request.password)
     user = User.create(
         email=request.email,
         hashed_password=hashed,
@@ -90,7 +91,7 @@ async def log_in_handler(
     if user is None:
         await rate_limit.record_failure(request.email, ip)
         raise HTTPException(status_code=401, detail="invalid email or password")
-    if not auth_service.verify_password(request.password, user.password):
+    if not await auth_service.verify_password_async(request.password, user.password):
         await rate_limit.record_failure(request.email, ip)
         raise HTTPException(status_code=401, detail="invalid email or password")
 
@@ -183,7 +184,9 @@ async def change_password_handler(
     auth_service: AuthService = Depends(),
     otp_service: OTPService = Depends(),
 ):
-    if not auth_service.verify_password(request.current_password, current_user.password):
+    if not await auth_service.verify_password_async(
+        request.current_password, current_user.password
+    ):
         raise HTTPException(status_code=403, detail="current password does not match")
 
     saved = await otp_service.get_otp(current_user.email, purpose="password_change")
@@ -192,7 +195,7 @@ async def change_password_handler(
     if saved != request.otp:
         raise HTTPException(status_code=400, detail="invalid otp")
 
-    current_user.password = auth_service.hash_password(request.new_password)
+    current_user.password = await auth_service.hash_password_async(request.new_password)
     await user_repo.update_user(current_user)
     await otp_service.delete_otp(current_user.email, purpose="password_change")
     return {"message": "password changed"}
@@ -411,7 +414,7 @@ async def reset_password_verify_handler(
     if user is None:
         raise HTTPException(status_code=400, detail="invalid otp")
 
-    user.password = auth_service.hash_password(request.new_password)
+    user.password = await auth_service.hash_password_async(request.new_password)
     await user_repo.update_user(user)
     await otp_service.delete_otp(request.email, purpose="reset")
 

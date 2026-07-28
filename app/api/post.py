@@ -27,8 +27,10 @@ repository 패턴 적용
 2026-07-28
 게시글 수정 요청 스키마 검증
 게시글 목록 페이지네이션 / 제목·본문·작성자 검색 / N+1 제거
+Redis 장애 시 조회수만 포기하고 글 조회는 계속하도록 변경
 '''
 
+import logging
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from datetime import datetime, timezone
 from typing import Literal
@@ -49,6 +51,7 @@ from ..database.cache import get_redis_client
 from redis.asyncio import Redis
 
 router = APIRouter(tags=["post"])
+logger = logging.getLogger(__name__)
 
 # 같은 IP 의 재조회를 이 시간 동안은 세지 않는다 (새로고침 뻥튀기 방지)
 VIEW_DEDUP_TTL_SECONDS = 60 * 60 * 6   # 6시간
@@ -130,14 +133,21 @@ async def get_page_handler(
         raise HTTPException(status_code=404, detail="post not found")
 
     # 조회수: 삭제된 글(관리자만 봄)은 세지 않는다.
-    # IP 마다 Redis 키를 두어, 없을 때만(=처음 볼 때만) +1 한다 — 새로고침 뻥튀기 방지
+    # Redis 장애가 글 조회까지 막아서는 안 되므로 조회수만 포기한다.
     if not post.is_deleted:
         ip = request.client.host if request.client else "unknown"
-        first_view = await redis.set(
-            f"viewed:{post.id}:{ip}", "1", nx=True, ex=VIEW_DEDUP_TTL_SECONDS
-        )
-        if first_view:
-            post.view_count = await post_repo.increment_view_count(post.id)
+        try:
+            first_view = await redis.set(
+                f"viewed:{post.id}:{ip}", "1", nx=True, ex=VIEW_DEDUP_TTL_SECONDS
+            )
+        except Exception:
+            logger.exception(
+                "view deduplication failed; serving post without increment",
+                extra={"post_id": post.id},
+            )
+        else:
+            if first_view:
+                post.view_count = await post_repo.increment_view_count(post.id)
 
     # relationship 은 삭제 여부를 안 가리므로 표시 규칙을 직접 적용한다
     post.comments = visible_comments(post.comments)

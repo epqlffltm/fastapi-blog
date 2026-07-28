@@ -15,10 +15,14 @@ async 전환 (asyncpg) / echo 를 설정으로
 
 2026-07-28
 업로드 이미지 크기 제한 설정 추가
+JWT 비밀키 길이와 알고리즘 검증 추가
 '''
+
+from typing import Literal
 
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -27,7 +31,7 @@ class Settings(BaseSettings):
 
     database_url: str
     jwt_secret_key: str
-    jwt_algorithm: str = "HS256"
+    jwt_algorithm: Literal["HS256"] = "HS256"
     redis_host: str = "127.0.0.1"
     redis_port: int = 6379
     smtp_host: str = "smtp.gmail.com"      # 추가
@@ -41,6 +45,14 @@ class Settings(BaseSettings):
     upload_max_height: int = 10_000
     upload_max_pixels: int = 25_000_000
     db_echo: bool = False    # 배포에선 False, 로컬 디버깅 때만 True
+
+    @field_validator("jwt_secret_key")
+    @classmethod
+    def validate_jwt_secret_key(cls, value: str) -> str:
+        """짧은 예제 키가 운영 설정으로 들어가면 기동 시 거부한다."""
+        if len(value.encode("utf-8")) < 32:
+            raise ValueError("JWT_SECRET_KEY must be at least 32 UTF-8 bytes")
+        return value
 
 
 settings = Settings()
