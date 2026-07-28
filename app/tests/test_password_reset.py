@@ -60,7 +60,7 @@ def test_reset_password_same_message_either_way(
 
 def test_reset_password_cooldown(client, mock_user_repo, mock_redis, mock_email_service):
     mock_user_repo.get_user_by_email.return_value = _make_user()
-    mock_redis.set.return_value = None        # 제한 키가 이미 있음
+    mock_redis.eval.return_value = 0        # 쿨다운 또는 시간당 횟수 제한
 
     response = client.post("/user/password/reset", json={"email": "test@example.com"})
 

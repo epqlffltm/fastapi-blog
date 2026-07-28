@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 from app.database.connection import settings
 from app.database.orm import User
 from app.service.auth import AuthService
+from app.service.otp import OTPService
 
 
 def _make_user(id=1, email="test@example.com", nickname="tester"):
@@ -350,11 +351,76 @@ def test_change_password_requires_login(client, mock_user_repo):
     mock_user_repo.update_user.assert_not_called()
 
 
+def test_create_otp_uses_secrets(monkeypatch):
+    """OTP 생성은 random이 아니라 secrets를 사용한다."""
+    monkeypatch.setattr("app.service.otp.secrets.randbelow", lambda upper: 0)
+    assert OTPService.create_otp() == 100_000
+
+
+def test_otp_send_slot_allowed(mock_redis):
+    service = OTPService(redis=mock_redis)
+    mock_redis.eval.return_value = 1
+
+    assert service.acquire_send_slot("test@example.com", purpose="signup") is True
+    mock_redis.eval.assert_called_once()
+
+
+def test_otp_send_slot_rejected(mock_redis):
+    service = OTPService(redis=mock_redis)
+    mock_redis.eval.return_value = 0
+
+    assert service.acquire_send_slot("test@example.com", purpose="signup") is False
+
+
 def test_send_password_change_otp(auth_client, mock_redis, mock_email_service):
-    """코드 발송 요청 → 200"""
-    mock_redis.set.return_value = True      # 쿨다운 통과
+    """코드 발송 제한 통과 → 200"""
+    mock_redis.eval.return_value = 1
     response = auth_client.post("/user/me/password/otp")
+
     assert response.status_code == 200
+    mock_email_service.send_password_reset.assert_called_once()
+
+
+def test_send_password_change_otp_rate_limited(
+    auth_client, mock_redis, mock_email_service
+):
+    """1분 쿨다운 또는 시간당 제한에 걸리면 429."""
+    mock_redis.eval.return_value = 0
+    response = auth_client.post("/user/me/password/otp")
+
+    assert response.status_code == 429
+    assert response.json()["detail"] == "too many requests"
+    mock_email_service.send_password_reset.assert_not_called()
+
+
+def test_signup_otp_rate_limited(
+    unverified_client, mock_redis, mock_email_service
+):
+    mock_redis.eval.return_value = 0
+    response = unverified_client.post("/user/email/otp")
+
+    assert response.status_code == 429
+    assert response.json()["detail"] == "too many requests"
+    mock_email_service.send_otp.assert_not_called()
+
+
+def test_password_reset_rate_limit_keeps_generic_response(
+    client, mock_user_repo, mock_redis, mock_email_service
+):
+    """재설정 요청은 제한에 걸려도 계정 존재 여부를 숨기기 위해 같은 200 응답."""
+    mock_user_repo.get_user_by_email.return_value = _make_user()
+    mock_redis.eval.return_value = 0
+
+    response = client.post(
+        "/user/password/reset",
+        json={"email": "test@example.com"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "message": "if the email exists, a code has been sent"
+    }
+    mock_email_service.send_password_reset.assert_not_called()
 
 
 def test_change_password_short(auth_client, mock_user_repo, current_user, mock_redis):

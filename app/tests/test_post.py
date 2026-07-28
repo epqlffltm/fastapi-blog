@@ -13,7 +13,12 @@
 '''
 
 from datetime import datetime, timezone
+
+import pytest
+from pydantic import ValidationError
+
 from app.database.orm import Post, User, Category
+from app.schema.request import PostCreate
 
 
 def _make_user(id=1, nickname="tester"):
@@ -51,6 +56,17 @@ def _make_post(id=1, title="테스트 글", contents="본문", user_id=1, nickna
     post.category = _make_category()
     post.comments = []
     return post
+
+
+def _make_post_request(**overrides):
+    """PostCreate 스키마 검증용 요청 객체 생성 헬퍼"""
+    data = {
+        "title": "제목",
+        "contents": "본문",
+        "category_id": 1,
+    }
+    data.update(overrides)
+    return PostCreate(**data)
 
 
 # ---------- 목록 조회 ----------
@@ -226,6 +242,49 @@ def test_create_post_missing_field(admin_client, mock_post_repo, mock_category_r
     response = admin_client.post("/page", json={"title": "제목만"})
 
     assert response.status_code == 422
+
+
+# ---------- 생성 요청값 검증 ----------
+
+def test_post_create_accepts_title_boundaries():
+    """제목은 공백 제거 후 1자부터 200자까지 허용한다"""
+    assert _make_post_request(title="a").title == "a"
+    assert len(_make_post_request(title="a" * 200).title) == 200
+
+
+def test_post_create_rejects_title_over_200():
+    """제목이 200자를 넘으면 거부한다"""
+    with pytest.raises(ValidationError):
+        _make_post_request(title="a" * 201)
+
+
+def test_post_create_strips_title_edges():
+    """제목 앞뒤 공백은 저장 전에 제거한다"""
+    assert _make_post_request(title="  제목  ").title == "제목"
+
+
+def test_post_create_rejects_blank_title():
+    """공백만 있는 제목은 거부한다"""
+    with pytest.raises(ValidationError):
+        _make_post_request(title="   ")
+
+
+def test_post_create_accepts_contents_boundaries():
+    """본문은 1자부터 100,000자까지 허용한다"""
+    assert _make_post_request(contents="a").contents == "a"
+    assert len(_make_post_request(contents="a" * 100_000).contents) == 100_000
+
+
+def test_post_create_rejects_contents_over_100000():
+    """본문이 100,000자를 넘으면 거부한다"""
+    with pytest.raises(ValidationError):
+        _make_post_request(contents="a" * 100_001)
+
+
+def test_post_create_rejects_blank_contents():
+    """공백 문자만 있는 본문은 거부한다"""
+    with pytest.raises(ValidationError):
+        _make_post_request(contents=" \n\t ")
 
 
 # ---------- 수정 ----------

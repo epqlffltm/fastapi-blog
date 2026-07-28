@@ -161,6 +161,8 @@ def mock_upload_service():
 @pytest.fixture
 def mock_redis():
     redis = Mock(spec=Redis)
+    # OTP 발송 제한 Lua 스크립트의 기본 상태: 발송 허용
+    redis.eval.return_value = 1
     app.dependency_overrides[get_redis_client] = lambda: redis
     yield redis
     app.dependency_overrides.clear()

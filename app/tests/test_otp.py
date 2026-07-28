@@ -32,7 +32,7 @@ def test_create_otp(auth_client, current_user, mock_redis, mock_email_service):
 
 def test_create_otp_cooldown(auth_client, current_user, mock_redis, mock_email_service):
     current_user.is_verified = False
-    mock_redis.set.return_value = None       # 제한 키가 이미 있는 상태
+    mock_redis.eval.return_value = 0       # 쿨다운 또는 시간당 횟수 제한
 
     response = auth_client.post("/user/email/otp")
 

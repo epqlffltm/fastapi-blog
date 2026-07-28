@@ -21,7 +21,7 @@ nickname 제거 (작성자는 토큰에서)
 프로필 수정(닉네임·소개)
 '''
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 class ContentCreate(BaseModel):
@@ -29,8 +29,27 @@ class ContentCreate(BaseModel):
 
 
 class PostCreate(ContentCreate):
-    title: str
+    title: str = Field(min_length=1, max_length=200)
+    contents: str = Field(min_length=1, max_length=100_000)
     category_id: int
+
+    @field_validator("title", mode="before")
+    @classmethod
+    def normalize_title(cls, value: str) -> str:
+        # 제목 앞뒤 공백은 저장하지 않고, 공백만 있는 제목은 거부한다
+        if isinstance(value, str):
+            value = value.strip()
+        if not value:
+            raise ValueError("title must not be blank")
+        return value
+
+    @field_validator("contents")
+    @classmethod
+    def validate_contents(cls, value: str) -> str:
+        # 마크다운 원문은 보존하되 공백만 있는 본문은 거부한다
+        if not value.strip():
+            raise ValueError("contents must not be blank")
+        return value
 
 
 class CommentCreate(ContentCreate):

@@ -130,12 +130,14 @@ async def send_password_change_otp_handler(
     email_service: EmailService = Depends(),
 ):
     # 로그인된 본인의 이메일로만 보낸다 (요청에서 이메일을 안 받아, 남의 주소로 못 보냄)
-    if otp_service.start_cooldown(current_user.email, purpose="password_change"):
-        otp = otp_service.create_otp()
-        otp_service.save_otp(email=current_user.email, otp=otp, purpose="password_change")
-        background_tasks.add_task(
-            email_service.send_password_reset, current_user.email, otp
-        )
+    if not otp_service.acquire_send_slot(current_user.email, purpose="password_change"):
+        raise HTTPException(status_code=429, detail="too many requests")
+
+    otp = otp_service.create_otp()
+    otp_service.save_otp(email=current_user.email, otp=otp, purpose="password_change")
+    background_tasks.add_task(
+        email_service.send_password_reset, current_user.email, otp
+    )
     return {"message": "a code has been sent to your email"}
 
 
@@ -269,7 +271,7 @@ async def create_otp_handler(
 ):
     if current_user.is_verified:
         raise HTTPException(status_code=409, detail="already verified")
-    if not otp_service.start_cooldown(current_user.email, purpose="signup"):
+    if not otp_service.acquire_send_slot(current_user.email, purpose="signup"):
         raise HTTPException(status_code=429, detail="too many requests")
 
     otp = otp_service.create_otp()
@@ -311,7 +313,7 @@ async def reset_password_handler(
 ):
     # 계정이 없어도 있는 것처럼 응답한다 (가입 여부 노출 방지)
     user = await user_repo.get_user_by_email(request.email)
-    if user is not None and otp_service.start_cooldown(request.email, purpose="reset"):
+    if user is not None and otp_service.acquire_send_slot(request.email, purpose="reset"):
         otp = otp_service.create_otp()
         otp_service.save_otp(email=request.email, otp=otp, purpose="reset")
         background_tasks.add_task(
