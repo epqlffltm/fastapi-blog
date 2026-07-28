@@ -32,20 +32,22 @@ class OTPVerifyResult(IntEnum):
 
 
 class OTPService:
-    ttl: int = 3 * 60
-    cooldown: int = 60
-    send_window: int = 60 * 60
-    max_sends: int = 5
-    max_verify_attempts: int = 5
+    ttl: int = 3 * 60           # 3분 후 자동 삭제
+    cooldown: int = 60          # 연속 발송 제한 (1분)
+    send_window: int = 60 * 60  # 발송 횟수 집계 구간 (1시간)
+    max_sends: int = 5          # 이메일·용도별 1시간 최대 발송 횟수
+    max_verify_attempts: int = 5  # OTP 하나당 최대 검증 실패 횟수
 
     def __init__(self, redis: Redis = Depends(get_redis_client)):
         self.redis = redis
 
     @staticmethod
     def _normalize_email(email: str) -> str:
+        """키 우회를 막기 위해 이메일 표기를 소문자로 통일한다."""
         return email.strip().lower()
 
     def _key(self, email: str, purpose: str) -> str:
+        # 용도별로 키를 분리해야 가입 코드로 비번을 못 바꾼다
         return f"otp:{purpose}:{self._normalize_email(email)}"
 
     def _cooldown_key(self, email: str, purpose: str) -> str:
@@ -59,6 +61,7 @@ class OTPService:
 
     @staticmethod
     def create_otp() -> int:
+        # 암호학적으로 안전한 난수로 100000~999999 범위의 코드를 만든다
         return secrets.randbelow(900_000) + 100_000
 
     async def acquire_send_slot(self, email: str, purpose: str) -> bool:
@@ -81,10 +84,12 @@ class OTPService:
         end
 
         redis.call("SET", cooldown_key, "1", "EX", cooldown_seconds)
+
         local new_count = redis.call("INCR", count_key)
         if new_count == 1 then
             redis.call("EXPIRE", count_key, window_seconds)
         end
+
         return 1
         """
 
@@ -97,12 +102,22 @@ class OTPService:
             self.send_window,
             self.max_sends,
         )
+
         return result == 1
 
     async def start_cooldown(self, email: str, purpose: str) -> bool:
-        return await self.acquire_send_slot(email=email, purpose=purpose)
+        """기존 호출부 호환용."""
+        return await self.acquire_send_slot(
+            email=email,
+            purpose=purpose,
+        )
 
-    async def save_otp(self, email: str, otp: int, purpose: str) -> None:
+    async def save_otp(
+        self,
+        email: str,
+        otp: int,
+        purpose: str,
+    ) -> None:
         """새 OTP를 저장하고 이전 코드의 검증 실패 횟수를 함께 초기화한다."""
         script = """
         -- OTP_SAVE_AND_RESET_ATTEMPTS
@@ -110,6 +125,7 @@ class OTPService:
         redis.call("DEL", KEYS[2])
         return 1
         """
+
         await self.redis.eval(
             script,
             2,
@@ -125,7 +141,12 @@ class OTPService:
         otp: int,
         purpose: str,
     ) -> OTPVerifyResult:
-        """검증 횟수를 제한하고 성공한 OTP를 한 Lua 실행 안에서 소비한다."""
+        """검증 횟수를 제한하고 성공한 OTP를 한 Lua 실행 안에서 소비한다.
+
+        GET → 비교 → DELETE를 파이썬에서 나누면 같은 OTP로 들어온 동시 요청이
+        둘 다 성공할 수 있다. Redis Lua는 전체 스크립트를 원자적으로 실행하므로
+        성공한 요청 하나만 코드를 소비하고, 나머지는 만료 상태를 받는다.
+        """
         script = """
         -- OTP_VERIFY_AND_CONSUME
         local otp_key = KEYS[1]
@@ -153,6 +174,7 @@ class OTPService:
 
         local remaining_ttl_ms = redis.call("PTTL", otp_key)
         local new_attempts = redis.call("INCR", attempts_key)
+
         if new_attempts == 1 then
             if remaining_ttl_ms > 0 then
                 redis.call("PEXPIRE", attempts_key, remaining_ttl_ms)
@@ -162,9 +184,12 @@ class OTPService:
         end
 
         if new_attempts >= max_attempts then
+            # 한도에 도달하면 정답 코드도 폐기한다. attempts_key는 남은 TTL 동안
+            # 유지해 이후 요청도 명확하게 차단한다.
             redis.call("DEL", otp_key)
             return -2
         end
+
         return 0
         """
 
@@ -177,16 +202,27 @@ class OTPService:
             self.max_verify_attempts,
             self.ttl,
         )
+
         try:
             return OTPVerifyResult(int(raw_result))
         except (TypeError, ValueError) as exc:
             raise RuntimeError(f"unexpected OTP verification result: {raw_result!r}") from exc
 
-    async def get_otp(self, email: str, purpose: str) -> int | None:
+    async def get_otp(
+        self,
+        email: str,
+        purpose: str,
+    ) -> int | None:
+        """호환용 조회 메서드. 실제 검증은 verify_and_consume()을 사용한다."""
         value = await self.redis.get(self._key(email, purpose))
         return int(value) if value is not None else None
 
-    async def delete_otp(self, email: str, purpose: str) -> None:
+    async def delete_otp(
+        self,
+        email: str,
+        purpose: str,
+    ) -> None:
+        """OTP와 검증 실패 횟수를 함께 삭제한다."""
         await self.redis.delete(
             self._key(email, purpose),
             self._verify_attempt_key(email, purpose),
