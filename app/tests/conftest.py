@@ -25,6 +25,7 @@ from app.database.cache import get_redis_client
 from app.api.dependency import get_current_user
 from app.service.email import EmailService
 from app.service.upload import UploadService
+from app.service.ratelimit import LoginRateLimitService
 from app.api.dependency import get_current_user, get_current_user_optional
 
 
@@ -170,6 +171,16 @@ def mock_redis():
 
     app.dependency_overrides[get_redis_client] = lambda: redis
     yield redis
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def mock_rate_limit():
+    """로그인 레이트리밋 — 기본은 통과. 막히는 경우는 테스트가 직접 켠다"""
+    service = AsyncMock(spec=LoginRateLimitService)
+    service.is_blocked.return_value = False
+    app.dependency_overrides[LoginRateLimitService] = lambda: service
+    yield service
     app.dependency_overrides.clear()
 
 

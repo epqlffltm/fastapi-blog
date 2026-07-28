@@ -927,3 +927,16 @@ select:focus { border-color: var(--accent); }
     margin-top: 4px;
     white-space: pre-wrap;
 }
+/* 마크다운 뷰어를 못 쓸 때의 대체 표시 */
+.markdown-fallback {
+    padding: 14px 16px;
+    background: var(--bg-inset);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.7;
+    white-space: pre-wrap;
+    word-break: break-word;
+}

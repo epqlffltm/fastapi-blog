@@ -12,7 +12,9 @@ httpOnly 쿠키 로그인 / 로그아웃
 
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response, UploadFile
+from fastapi import (
+    APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, UploadFile,
+)
 from sqlalchemy.exc import IntegrityError
 from ..database.connection import settings
 from ..database.orm import User
@@ -28,6 +30,7 @@ from ..service.auth import AuthService
 from ..service.upload import UploadService
 from ..service.email import EmailService
 from ..service.otp import OTPService
+from ..service.ratelimit import LoginRateLimitService
 from .dependency import get_current_user, get_active_user, require_permission, COOKIE_NAME
 
 router = APIRouter(prefix="/user", tags=["user"])
@@ -67,15 +70,32 @@ async def sign_up_handler(
 async def log_in_handler(
     request: LogInRequest,
     response: Response,
+    http_request: Request,
     user_repo: UserRepository = Depends(),
     auth_service: AuthService = Depends(),
+    rate_limit: LoginRateLimitService = Depends(),
 ):
+    # 프록시(ALB·nginx) 뒤에 두면 프록시 IP 가 잡힌다.
+    # 배포 시 --proxy-headers 로 X-Forwarded-For 를 신뢰하게 해야 한다
+    ip = http_request.client.host if http_request.client else "unknown"
+
+    # 비밀번호 검증 전에 막는다. bcrypt 는 의도적으로 느려서,
+    # 어차피 거절할 요청에 해시를 태우면 그게 CPU 고갈 통로가 된다
+    if await rate_limit.is_blocked(request.email, ip):
+        raise HTTPException(status_code=429, detail="too many login attempts")
+
     user = await user_repo.get_user_by_email(request.email)
-    # 이메일이 없든 비번이 틀리든 같은 메시지 (계정 존재 여부 노출 방지)
+    # 이메일이 없든 비번이 틀리든 같은 메시지 (계정 존재 여부 노출 방지).
+    # 실패 기록도 똑같이 남긴다 — 없는 계정만 빨리 응답하면 그 차이로 가입 여부가 샌다
     if user is None:
+        await rate_limit.record_failure(request.email, ip)
         raise HTTPException(status_code=401, detail="invalid email or password")
     if not auth_service.verify_password(request.password, user.password):
+        await rate_limit.record_failure(request.email, ip)
         raise HTTPException(status_code=401, detail="invalid email or password")
+
+    # 성공했으므로 이 계정의 실패 기록을 지운다 (IP 쪽은 남긴다)
+    await rate_limit.reset(request.email)
 
     # 제재된 계정도 로그인은 시킨다. 본인이 상태를 확인할 수 있어야 한다
     response.set_cookie(

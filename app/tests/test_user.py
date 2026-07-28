@@ -16,6 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from app.database.connection import settings
 from app.database.orm import User
 from app.service.auth import AuthService
+from app.service.ratelimit import LoginRateLimitService
 from app.service.otp import OTPService
 
 
@@ -226,6 +227,103 @@ def test_log_in_no_such_email(client, mock_user_repo):
     assert response.status_code == 401
     # 없는 계정도 비번 틀림과 같은 메시지여야 한다
     assert response.json()["detail"] == "invalid email or password"
+
+
+# ---------- 로그인 실패 횟수 제한 (브루트포스) ----------
+
+def test_log_in_blocked_when_rate_limited(client, mock_user_repo, mock_rate_limit):
+    """한도를 넘으면 429. 비밀번호 검증까지 가지 않아야 한다."""
+    mock_rate_limit.is_blocked.return_value = True
+
+    response = client.post(
+        "/user/log-in",
+        json={"email": "test@example.com", "password": "password123"},
+    )
+
+    assert response.status_code == 429
+    assert response.json()["detail"] == "too many login attempts"
+    assert "set-cookie" not in response.headers
+    # bcrypt 를 태우지 않으려면 조회조차 하면 안 된다
+    mock_user_repo.get_user_by_email.assert_not_called()
+
+
+def test_log_in_wrong_password_records_failure(client, mock_user_repo, mock_rate_limit):
+    user = _make_user()
+    user.password = AuthService().hash_password("password123")
+    mock_user_repo.get_user_by_email.return_value = user
+
+    response = client.post(
+        "/user/log-in",
+        json={"email": "test@example.com", "password": "wrongpassword"},
+    )
+
+    assert response.status_code == 401
+    mock_rate_limit.record_failure.assert_awaited_once()
+    mock_rate_limit.reset.assert_not_awaited()
+
+
+def test_log_in_unknown_email_also_records_failure(
+    client, mock_user_repo, mock_rate_limit
+):
+    """없는 계정도 똑같이 기록한다. 안 그러면 응답 차이로 가입 여부가 샌다."""
+    mock_user_repo.get_user_by_email.return_value = None
+
+    response = client.post(
+        "/user/log-in",
+        json={"email": "nobody@example.com", "password": "password123"},
+    )
+
+    assert response.status_code == 401
+    mock_rate_limit.record_failure.assert_awaited_once()
+
+
+def test_log_in_success_resets_counter(client, mock_user_repo, mock_rate_limit):
+    user = _make_user()
+    user.password = AuthService().hash_password("password123")
+    mock_user_repo.get_user_by_email.return_value = user
+
+    response = client.post(
+        "/user/log-in",
+        json={"email": "test@example.com", "password": "password123"},
+    )
+
+    assert response.status_code == 200
+    mock_rate_limit.reset.assert_awaited_once()
+    mock_rate_limit.record_failure.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_allows_under_threshold(mock_redis):
+    service = LoginRateLimitService(redis=mock_redis)
+    mock_redis.eval.return_value = 0
+
+    assert await service.is_blocked("test@example.com", "1.2.3.4") is False
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_blocks_over_threshold(mock_redis):
+    service = LoginRateLimitService(redis=mock_redis)
+    mock_redis.eval.return_value = 1
+
+    assert await service.is_blocked("test@example.com", "1.2.3.4") is True
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_fails_open_when_redis_down(mock_redis):
+    """Redis 장애로 전 사용자 로그인이 막히는 쪽이 더 큰 사고다."""
+    mock_redis.eval.side_effect = ConnectionError("redis down")
+
+    service = LoginRateLimitService(redis=mock_redis)
+    assert await service.is_blocked("test@example.com", "1.2.3.4") is False
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_reset_clears_email_counter_only(mock_redis):
+    """IP 카운터는 남긴다 — 자기 계정 로그인으로 IP 한도를 초기화하지 못하게."""
+    service = LoginRateLimitService(redis=mock_redis)
+    await service.reset("Test@Example.com")
+
+    mock_redis.delete.assert_awaited_once_with("login-fail:email:test@example.com")
 
 
 def test_banned_can_still_log_in(client, mock_user_repo):

@@ -52,11 +52,42 @@ async function init() {
         return;
     }
 
-    render(post);
-    renderCommentForm();
+    // 그리다 실패해도 "불러오는 중…" 에서 멈추지 않게 한다.
+    // 무엇이 잘못됐는지는 화면과 콘솔 양쪽에 남긴다
+    try {
+        render(post);
+        renderCommentForm();
+    } catch (err) {
+        console.error("post render failed:", err);
+        status.textContent = "글을 표시하는 중 문제가 생겼습니다.";
+        status.hidden = false;
+        article.hidden = false;
+        return;
+    }
 
     status.hidden = true;
     article.hidden = false;
+}
+
+
+// 마크다운 뷰어로 그리되, 라이브러리를 못 쓰면 원문을 평문으로 보여준다.
+// textContent 라 원문에 태그가 섞여 있어도 실행되지 않는다
+function renderBody(contents) {
+    try {
+        toastui.Editor.factory({
+            el: viewerEl,
+            viewer: true,
+            theme: "dark",
+            initialValue: contents,
+        });
+    } catch (err) {
+        console.error("markdown viewer unavailable, falling back to plain text:", err);
+
+        const pre = document.createElement("pre");
+        pre.className = "markdown-fallback";
+        pre.textContent = contents;
+        viewerEl.replaceChildren(pre);
+    }
 }
 
 function render(post) {
@@ -116,13 +147,10 @@ function render(post) {
         postActions.append(restore);
     }
 
-    // 저장된 건 마크다운 텍스트. 뷰어가 HTML 로 바꿔 그린다
-    toastui.Editor.factory({
-        el: viewerEl,
-        viewer: true,
-        theme: "dark",
-        initialValue: post.contents,
-    });
+    // 저장된 건 마크다운 텍스트. 뷰어가 HTML 로 바꿔 그린다.
+    // 뷰어는 외부 라이브러리라 없거나 깨질 수 있다. 그때 글 전체가 안 보이면
+    // 안 되므로, 실패하면 마크다운 원문이라도 그대로 보여준다
+    renderBody(post.contents);
 
     // 좋아요 바 — 삭제된 글엔 안 보인다 (좋아요 대상이 아님)
     if (!post.is_deleted) {
