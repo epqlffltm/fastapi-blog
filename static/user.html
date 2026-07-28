@@ -20,17 +20,34 @@
                 <img id="pub-avatar" class="avatar-preview" alt="프로필 이미지">
                 <div>
                     <h1 id="pub-nickname"></h1>
-                    <p id="pub-bio" class="bio"></p>
-                    <!-- 본인일 때만 보인다. 공개 항목은 누가 보든 동일하다 -->
                     <p class="profile-actions" id="profile-actions" hidden>
                         <a class="ghost-btn" href="/profile">설정</a>
                     </p>
                 </div>
             </div>
 
-            <h2>작성한 글</h2>
-            <ul class="post-list" id="pub-posts"></ul>
-            <p class="empty" id="pub-posts-empty" hidden>아직 작성한 글이 없습니다.</p>
+            <!-- 소개글 박스 -->
+            <div class="bio-box">
+                <h3>소개</h3>
+                <p class="bio-text" id="pub-bio"></p>
+            </div>
+
+            <!-- 글 | 댓글 2단 -->
+            <div class="profile-columns">
+                <div class="profile-box">
+                    <h2>작성한 글</h2>
+                    <ul class="post-list" id="pub-posts"></ul>
+                    <p class="empty" id="pub-posts-empty" hidden>아직 작성한 글이 없습니다.</p>
+                    <nav class="pagination" id="posts-pagination" aria-label="글 페이지"></nav>
+                </div>
+
+                <div class="profile-box" id="comments-box" hidden>
+                    <h2>작성한 댓글</h2>
+                    <ul class="comment-list" id="pub-comments"></ul>
+                    <p class="empty" id="pub-comments-empty" hidden>아직 작성한 댓글이 없습니다.</p>
+                    <nav class="pagination" id="comments-pagination" aria-label="댓글 페이지"></nav>
+                </div>
+            </div>
         </section>
 
         <p class="empty" id="status">불러오는 중…</p>

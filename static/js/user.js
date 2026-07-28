@@ -1,6 +1,7 @@
-// 2026-07-27 남의 공개 프로필 페이지 (닉네임·소개·이미지 + 그 사람 글 목록)
-// 2026-07-28 본인/타인 구분 — 본인이면 설정 버튼. 공개 항목은 누가 보든 동일하다.
-//            실패 원인을 뭉뚱그리지 않도록 오류 처리 분리
+// 2026-07-28 공개 프로필: 소개 박스 + 글/댓글 좌우 박스 + 페이지네이션
+// 본인/타인 모두 글·댓글 표시. 본인일 때만 설정 버튼
+
+const PAGE_SIZE = 10;
 
 const statusEl = document.getElementById("status");
 const section = document.getElementById("user-profile");
@@ -9,11 +10,19 @@ const nicknameEl = document.getElementById("pub-nickname");
 const bioEl = document.getElementById("pub-bio");
 const postsEl = document.getElementById("pub-posts");
 const postsEmptyEl = document.getElementById("pub-posts-empty");
+const postsPaginationEl = document.getElementById("posts-pagination");
+const commentsEl = document.getElementById("pub-comments");
+const commentsEmptyEl = document.getElementById("pub-comments-empty");
+const commentsPaginationEl = document.getElementById("comments-pagination");
+const commentsBox = document.getElementById("comments-box");
 const actionsEl = document.getElementById("profile-actions");
 
-// URL 이 /user/3 이면 마지막 조각(3)이 유저 id
+let currentUserId = null;
+let postsPage = 1;
+let commentsPage = 1;
+
 function getUserIdFromPath() {
-    const parts = location.pathname.split("/").filter(Boolean);   // ["user", "3"]
+    const parts = location.pathname.split("/").filter(Boolean);
     return parts[parts.length - 1];
 }
 
@@ -31,10 +40,8 @@ function createPostItem(post) {
     const li = document.createElement("li");
     const link = document.createElement("a");
     link.href = `/post?id=${post.id}`;
-    link.textContent = post.title;            // 사용자 입력이므로 textContent
+    link.textContent = post.title;
 
-    // 삭제 글은 글 관리 권한자에게만 내려온다.
-    // 표시가 없으면 살아 있는 글과 구분이 안 되므로 인덱스와 같은 뱃지를 붙인다
     if (post.is_deleted) {
         li.classList.add("deleted-post");
         const badge = document.createElement("span");
@@ -52,27 +59,114 @@ function createPostItem(post) {
         ` · 조회 ${post.view_count}` +
         ` · 좋아요 ${post.like_count}` +
         ` · 댓글 ${post.comment_count}`;
-
     li.append(meta);
     return li;
 }
 
-function renderPosts(posts) {
+function createCommentItem(comment) {
+    const li = document.createElement("li");
+    if (comment.parent_id) li.classList.add("reply");
+    if (comment.is_deleted) li.classList.add("deleted");
+
+    const context = document.createElement("div");
+    context.className = "meta";
+
+    const postLink = document.createElement("a");
+    postLink.href = `/post?id=${comment.post.id}`;
+    postLink.textContent = comment.post.title || "(제목 없음)";
+    context.append(postLink);
+
+    const label = document.createElement("span");
+    label.textContent = comment.parent_id ? " · 대댓글" : " · 댓글";
+    context.append(label);
+
+    const body = document.createElement("div");
+    body.className = "comment-body";
+    body.textContent = comment.is_deleted ? "삭제된 댓글입니다." : comment.contents;
+    if (comment.is_deleted) body.classList.add("deleted");
+
+    const date = document.createElement("div");
+    date.className = "meta";
+    date.textContent = formatDate(comment.created_at);
+
+    li.append(context, body, date);
+    return li;
+}
+
+function renderPagination(container, page, totalPages, onPage) {
+    container.replaceChildren();
+    if (totalPages <= 1) return;
+
+    const prev = document.createElement("button");
+    prev.type = "button";
+    prev.textContent = "이전";
+    prev.disabled = page <= 1;
+    prev.addEventListener("click", () => onPage(page - 1));
+
+    const status = document.createElement("span");
+    status.className = "pagination-status";
+    status.textContent = `${page} / ${totalPages}`;
+
+    const next = document.createElement("button");
+    next.type = "button";
+    next.textContent = "다음";
+    next.disabled = page >= totalPages;
+    next.addEventListener("click", () => onPage(page + 1));
+
+    container.append(prev, status, next);
+}
+
+async function loadPosts(page = 1) {
+    postsPage = page;
     postsEl.replaceChildren();
-
-    if (posts.length === 0) {
-        postsEmptyEl.hidden = false;
-        return;
-    }
-
     postsEmptyEl.hidden = true;
-    for (const post of posts) {
-        postsEl.append(createPostItem(post));
+    postsPaginationEl.replaceChildren();
+
+    try {
+        const data = await api.get(
+            `/pages?author=${currentUserId}&order=desc&page=${page}&size=${PAGE_SIZE}`
+        );
+        if (!data.posts || data.posts.length === 0) {
+            postsEmptyEl.hidden = false;
+            return;
+        }
+        for (const post of data.posts) {
+            postsEl.append(createPostItem(post));
+        }
+        renderPagination(postsPaginationEl, data.page, data.total_pages, loadPosts);
+    } catch (err) {
+        console.error("post list load failed:", err);
+        postsEmptyEl.textContent = err.message || "글 목록을 불러오지 못했습니다.";
+        postsEmptyEl.hidden = false;
+    }
+}
+
+async function loadComments(page = 1) {
+    commentsPage = page;
+    commentsEl.replaceChildren();
+    commentsEmptyEl.hidden = true;
+    commentsPaginationEl.replaceChildren();
+
+    try {
+        const data = await api.get(
+            `/user/${currentUserId}/comments?page=${page}&size=${PAGE_SIZE}`
+        );
+        if (!data.comments || data.comments.length === 0) {
+            commentsEmptyEl.hidden = false;
+            return;
+        }
+        for (const c of data.comments) {
+            commentsEl.append(createCommentItem(c));
+        }
+        renderPagination(commentsPaginationEl, data.page, data.total_pages, loadComments);
+    } catch (err) {
+        console.error("comment list load failed:", err);
+        commentsEmptyEl.textContent = err.message || "댓글 목록을 불러오지 못했습니다.";
+        commentsEmptyEl.hidden = false;
     }
 }
 
 async function init() {
-    // 공개 페이지라 비로그인도 통과한다. 반환값으로 본인 여부를 판단한다
     let me = null;
     try {
         me = await renderHeader();
@@ -80,17 +174,15 @@ async function init() {
         console.error("header render failed:", err);
     }
 
-    const id = getUserIdFromPath();
-    if (!id) {
+    currentUserId = getUserIdFromPath();
+    if (!currentUserId) {
         statusEl.textContent = "잘못된 접근입니다.";
         return;
     }
 
-    // 프로필과 글 목록은 실패 이유가 다르다.
-    // 하나로 묶어 catch 하면 글 목록이 터져도 "없는 사용자"라고 뜬다
     let user;
     try {
-        user = await api.get(`/user/${id}/profile`);
+        user = await api.get(`/user/${currentUserId}/profile`);
     } catch (err) {
         statusEl.textContent =
             err.status === 404
@@ -104,24 +196,19 @@ async function init() {
     bioEl.textContent = user.bio || "";
     document.title = `${user.nickname} · blog`;
 
-    // 본인일 때만 설정으로 가는 길을 연다.
-    // 화면에 보이는 정보 자체는 남이 볼 때와 똑같다 — 여기서 이메일·권한은 다루지 않는다
+    // 본인일 때만 설정 버튼
     if (me !== null && me.id === user.id) {
         actionsEl.hidden = false;
     }
 
-    // 프로필은 이미 그렸다. 글 목록만 실패해도 프로필은 남는다
-    try {
-        const data = await api.get(`/pages?author=${id}&order=desc`);
-        renderPosts(data.posts);
-    } catch (err) {
-        console.error("post list load failed:", err);
-        postsEmptyEl.textContent = err.message || "글 목록을 불러오지 못했습니다.";
-        postsEmptyEl.hidden = false;
-    }
+    // 댓글 박스는 모든 계정에 표시
+    commentsBox.hidden = false;
 
     statusEl.hidden = true;
     section.hidden = false;
+
+    await loadPosts(1);
+    await loadComments(1);
 }
 
 init();

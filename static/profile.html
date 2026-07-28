@@ -17,7 +17,6 @@
     <main class="container">
         <section id="profile" hidden>
             <h1>설정</h1>
-            <!-- 공개 프로필로 돌아가는 길. id 는 JS 가 채운다 -->
             <p class="profile-actions">
                 <a class="ghost-btn" id="view-profile-link" href="/">내 프로필 보기</a>
             </p>
@@ -31,10 +30,27 @@
                 </div>
             </div>
 
-            <form id="profile-form">
+            <!-- 작성한 글 / 댓글 (상단) -->
+            <div class="profile-columns">
+                <div class="profile-box">
+                    <h2>작성한 글</h2>
+                    <ul class="post-list" id="my-posts"></ul>
+                    <p class="empty" id="my-posts-empty" hidden>아직 작성한 글이 없습니다.</p>
+                    <nav class="pagination" id="my-posts-pagination" aria-label="글 페이지"></nav>
+                </div>
+
+                <div class="profile-box">
+                    <h2>작성한 댓글</h2>
+                    <ul class="comment-list" id="my-comments"></ul>
+                    <p class="empty" id="my-comments-empty" hidden>아직 작성한 댓글이 없습니다.</p>
+                    <nav class="pagination" id="my-comments-pagination" aria-label="댓글 페이지"></nav>
+                </div>
+            </div>
+
+            <!-- 기본 정보 수정 -->
+            <form id="profile-form" style="margin-top: 32px;">
                 <div class="field">
                     <label for="email">이메일</label>
-                    <!-- 이메일 변경은 지원하지 않으므로 읽기 전용 -->
                     <input type="email" id="email" disabled>
                 </div>
                 <div class="field">

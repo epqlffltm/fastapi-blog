@@ -2,6 +2,7 @@
 // 2026-07-25 관리자(can_manage_post) 수정·삭제 노출 / 삭제됨 뱃지 / 삭제 복구
 // 2026-07-26 조회수 표시 / 좋아요 버튼
 // 2026-07-27 작성자 닉네임 → 공개 프로필 링크
+// 2026-07-28 작성자 클릭: 내 아이디면 /profile, 아니면 /user/{id}
 
 const postId = new URLSearchParams(location.search).get("id");
 
@@ -26,7 +27,6 @@ const commentGuard = document.getElementById("comment-guard");
 
 let currentUser = null;
 
-// 댓글을 쓸 수 있는 상태인지 (서버 판단과 같은 순서로 본다)
 function canWriteComment() {
     return (
         currentUser !== null
@@ -52,8 +52,6 @@ async function init() {
         return;
     }
 
-    // 그리다 실패해도 "불러오는 중…" 에서 멈추지 않게 한다.
-    // 무엇이 잘못됐는지는 화면과 콘솔 양쪽에 남긴다
     try {
         render(post);
         renderCommentForm();
@@ -69,9 +67,6 @@ async function init() {
     article.hidden = false;
 }
 
-
-// 마크다운 뷰어로 그리되, 라이브러리를 못 쓰면 원문을 평문으로 보여준다.
-// textContent 라 원문에 태그가 섞여 있어도 실행되지 않는다
 function renderBody(contents) {
     try {
         toastui.Editor.factory({
@@ -92,39 +87,37 @@ function renderBody(contents) {
 
 function render(post) {
     document.title = `${post.title} · blog`;
-    titleEl.textContent = post.title;          // 사용자 입력이므로 textContent
+    titleEl.textContent = post.title;
 
-    // 내 글이거나 관리자면 수정·삭제를 보인다 (실제 차단은 서버가 한다)
     const canManage =
         currentUser &&
         (currentUser.id === post.user.id || currentUser.can_manage_post);
     if (canManage) {
         document.getElementById("edit-link").href = `/edit?id=${post.id}`;
         postActions.hidden = false;
-        // 이미 삭제된 글이면 삭제 버튼은 감춘다 (복구 버튼이 대신 뜬다)
         if (post.is_deleted) {
             document.getElementById("delete-btn").hidden = true;
         }
     }
 
-    // 메타 줄을 먼저 채운다 (카테고리 · 작성자 · 날짜)
     metaEl.replaceChildren();
     const category = document.createElement("span");
     category.className = "category-tag";
     category.textContent = post.category.name;
-    // 작성자 닉네임은 그 사람 공개 프로필로 가는 링크
+
     const sep1 = document.createElement("span");
     sep1.textContent = " · ";
+
+    // ★ 내 아이디면 /profile, 아니면 /user/{id}
     const authorLink = document.createElement("a");
-    authorLink.href = `/user/${post.user.id}`;
+    authorLink.href = authorHref(post.user.id);
     authorLink.className = "author-link";
-    authorLink.textContent = post.user.nickname;      // 사용자 입력이므로 textContent
+    authorLink.textContent = post.user.nickname;
 
     const rest = document.createElement("span");
     rest.textContent = ` · ${formatDate(post.created_at)} · 조회 ${post.view_count}`;
     metaEl.append(category, sep1, authorLink, rest);
 
-    // 삭제된 글이면(관리자만 여기까지 온다) 제목 옆 뱃지 + post-actions 에 복구 버튼
     if (post.is_deleted) {
         const badge = document.createElement("span");
         badge.className = "deleted-badge";
@@ -138,21 +131,16 @@ function render(post) {
             if (!confirm("이 글을 복구할까요?")) return;
             try {
                 await api.post(`/page/${post.id}/restore`, {});
-                location.reload();      // 복구되면 삭제 표시가 사라진 상태로 다시 그린다
+                location.reload();
             } catch (err) {
                 alert(err.message);
             }
         });
-        // 삭제 버튼이 있던 자리(post-actions)에 복구 버튼을 둔다
         postActions.append(restore);
     }
 
-    // 저장된 건 마크다운 텍스트. 뷰어가 HTML 로 바꿔 그린다.
-    // 뷰어는 외부 라이브러리라 없거나 깨질 수 있다. 그때 글 전체가 안 보이면
-    // 안 되므로, 실패하면 마크다운 원문이라도 그대로 보여준다
     renderBody(post.contents);
 
-    // 좋아요 바 — 삭제된 글엔 안 보인다 (좋아요 대상이 아님)
     if (!post.is_deleted) {
         setupLikeBar(post.id);
     }
@@ -160,13 +148,9 @@ function render(post) {
     renderComments(post.comments);
 }
 
-// 서버는 시간순 한 줄로 보낸다. 부모 아래 답글이 오도록 여기서 묶는다
-// ---------- 좋아요 ----------
-
 async function setupLikeBar(postId) {
     likeBtn.hidden = false;
 
-    // 초기 상태(좋아요 수 + 내가 눌렀는지)를 불러온다
     try {
         renderLike(await api.get(`/page/${postId}/like`));
     } catch (err) {
@@ -187,12 +171,10 @@ async function setupLikeBar(postId) {
 }
 
 function renderLike(status) {
-    // liked 면 채워진 하트, 아니면 빈 하트
     likeIcon.textContent = status.liked ? "♥" : "♡";
     likeCount.textContent = status.like_count;
     likeBtn.classList.toggle("liked", status.liked);
 }
-
 
 function renderComments(comments) {
     const alive = comments.filter((c) => !c.is_deleted).length;
@@ -207,7 +189,7 @@ function renderComments(comments) {
 
     commentList.replaceChildren();
     for (const comment of comments) {
-        if (comment.parent_id !== null) continue;      // 답글은 부모 차례에 붙는다
+        if (comment.parent_id !== null) continue;
         commentList.append(createCommentItem(comment));
         for (const reply of repliesOf.get(comment.id) ?? []) {
             commentList.append(createCommentItem(reply));
@@ -219,7 +201,6 @@ function createCommentItem(comment) {
     const li = document.createElement("li");
     if (comment.parent_id !== null) li.classList.add("reply");
 
-    // 자리표시자: 답글이 남아 있어 형태만 남긴 삭제된 원댓글
     if (comment.is_deleted) {
         const body = document.createElement("div");
         body.className = "comment-body deleted";
@@ -243,7 +224,7 @@ function createCommentItem(comment) {
 
     const body = document.createElement("div");
     body.className = "comment-body";
-    body.textContent = comment.contents;       // 댓글은 마크다운이 아니라 평문
+    body.textContent = comment.contents;
 
     li.append(head, body);
     li.append(createCommentActions(comment, li, body));
@@ -254,7 +235,6 @@ function createCommentActions(comment, li, body) {
     const actions = document.createElement("div");
     actions.className = "actions";
 
-    // 답글은 원댓글에만 달 수 있다 (깊이 1)
     if (comment.parent_id === null && canWriteComment()) {
         const reply = document.createElement("button");
         reply.className = "ghost-btn";
@@ -270,13 +250,12 @@ function createCommentActions(comment, li, body) {
         edit.addEventListener("click", () => startEdit(comment, li, body, actions));
 
         const del = document.createElement("button");
-        del.className = "ghost-btn danger";
+        del.className = "ghost-btn";
         del.textContent = "삭제";
         del.addEventListener("click", async () => {
             if (!confirm("댓글을 삭제할까요?")) return;
             try {
                 await api.del(`/comment/${comment.id}`);
-                // 답글이 남아 있으면 자리표시자가 되므로 서버에서 다시 받아 그린다
                 const post = await api.get(`/page/${postId}`);
                 renderComments(post.comments);
             } catch (err) {
@@ -286,36 +265,43 @@ function createCommentActions(comment, li, body) {
 
         actions.append(edit, del);
     }
+
     return actions;
 }
 
-// 답글 입력창을 댓글 바로 아래에 폈다 접었다 한다
-function toggleReplyForm(comment, li, button) {
+function toggleReplyForm(parent, li, replyBtn) {
     const existing = li.querySelector(".reply-form");
     if (existing) {
         existing.remove();
-        button.textContent = "답글";
+        replyBtn.textContent = "답글";
         return;
     }
 
-    const wrap = document.createElement("div");
-    wrap.className = "reply-form";
+    replyBtn.textContent = "취소";
+
+    const form = document.createElement("form");
+    form.className = "reply-form";
 
     const textarea = document.createElement("textarea");
+    textarea.rows = 3;
+    textarea.required = true;
     textarea.placeholder = "답글을 입력하세요";
-    textarea.style.minHeight = "70px";
 
     const submit = document.createElement("button");
-    submit.className = "ghost-btn";
+    submit.type = "submit";
+    submit.className = "primary";
     submit.textContent = "등록";
 
-    submit.addEventListener("click", async () => {
-        if (!textarea.value.trim()) return;
+    form.append(textarea, submit);
+    li.append(form);
+
+    form.addEventListener("submit", async (event) => {
+        event.preventDefault();
         submit.disabled = true;
         try {
             const post = await api.post(`/page/${postId}/comment`, {
                 contents: textarea.value,
-                parent_id: comment.id,
+                parent_id: parent.id,
             });
             renderComments(post.comments);
         } catch (err) {
@@ -323,29 +309,24 @@ function toggleReplyForm(comment, li, button) {
             submit.disabled = false;
         }
     });
-
-    wrap.append(textarea, submit);
-    li.append(wrap);
-    button.textContent = "취소";
-    textarea.focus();
 }
 
-// 읽기 모드 → 입력 모드. 저장하거나 취소하면 되돌린다
 function startEdit(comment, li, body, actions) {
     const textarea = document.createElement("textarea");
+    textarea.rows = 3;
     textarea.value = comment.contents;
-    textarea.style.minHeight = "80px";
+
+    const editActions = document.createElement("div");
+    editActions.className = "actions";
 
     const save = document.createElement("button");
-    save.className = "ghost-btn";
+    save.className = "primary";
     save.textContent = "저장";
 
     const cancel = document.createElement("button");
     cancel.className = "ghost-btn";
     cancel.textContent = "취소";
 
-    const editActions = document.createElement("div");
-    editActions.className = "actions";
     editActions.append(save, cancel);
 
     body.replaceWith(textarea);
@@ -374,7 +355,6 @@ function startEdit(comment, li, body, actions) {
     cancel.addEventListener("click", () => restore(comment.contents));
 }
 
-// 상태에 따라 댓글 폼 또는 안내를 보인다
 function renderCommentForm() {
     if (canWriteComment()) {
         commentForm.hidden = false;
@@ -417,7 +397,6 @@ commentForm.addEventListener("submit", async (event) => {
     commentSubmit.disabled = true;
 
     try {
-        // 댓글 생성은 갱신된 글 전체를 돌려준다 → 목록을 통째로 다시 그린다
         const post = await api.post(`/page/${postId}/comment`, {
             contents: commentInput.value,
         });

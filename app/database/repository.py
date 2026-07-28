@@ -29,6 +29,9 @@ LikeRepository (좋아요 추가/삭제/카운트/존재확인)
 
 2026-07-28
 게시글 목록 페이지네이션 / 검색 / 댓글·좋아요 집계
+
+2026-07-28
+유저별 댓글 목록 조회 추가
 '''
 
 from contextlib import asynccontextmanager
@@ -219,6 +222,39 @@ class CommentRepository:
         await self.session.refresh(comment)
         return comment
 
+    async def get_comments_by_user(
+        self,
+        user_id: int,
+        page: int = 1,
+        size: int = 20,
+        include_deleted: bool = False,
+    ) -> tuple[list[tuple], int]:
+        """
+        유저가 작성한 댓글 + 소속 글 정보
+        반환: ([(Comment, Post), ...], total)
+        """
+        filters = [Comment.user_id == user_id]
+        if not include_deleted:
+            filters.append(Comment.is_deleted.is_(False))
+
+        total = await self.session.scalar(
+            select(func.count(Comment.id)).where(*filters)
+        )
+
+        stmt = (
+            select(Comment, Post)
+            .join(Post, Post.id == Comment.post_id)
+            .where(*filters)
+            .order_by(Comment.created_at.desc(), Comment.id.desc())
+            .offset((page - 1) * size)
+            .limit(size)
+            .options(noload(Comment.user))
+        )
+
+        result = await self.session.execute(stmt)
+        rows = [(row[0], row[1]) for row in result.all()]
+        return rows, int(total or 0)
+
 
 class UserRepository:
     def __init__(self, session: AsyncSession = Depends(get_db)):
@@ -319,7 +355,6 @@ class UploadRepository:
             self.session.add(upload)
         await self.session.refresh(upload)
         return upload
-
 
 
 class LikeRepository:

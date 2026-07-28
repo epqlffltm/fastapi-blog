@@ -945,3 +945,69 @@ select:focus { border-color: var(--accent); }
 .profile-actions {
     margin: 10px 0 0;
 }
+
+/* ── 프로필 소개 박스 ───────────────────────────────────── */
+.bio-box {
+    margin-bottom: 28px;
+    padding: 16px 18px;
+    background: var(--bg-panel);
+    border-radius: 10px;
+    border: 1px solid var(--line-soft);
+}
+.bio-box h3 {
+    margin: 0 0 8px;
+    color: var(--text-faint);
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+.bio-box .bio-text {
+    margin: 0;
+    color: var(--text-dim);
+    white-space: pre-wrap;
+    line-height: 1.55;
+    font-size: 14px;
+}
+.bio-box .bio-text:empty::before {
+    content: "소개가 없습니다.";
+    color: var(--text-faint);
+}
+
+/* ── 프로필 2단 (글 | 댓글) ─────────────────────────────── */
+.profile-columns {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 28px;
+    align-items: start;
+    margin-top: 8px;
+}
+.profile-box {
+    min-width: 0;
+    padding: 16px 18px 18px;
+    background: var(--bg-panel);
+    border-radius: 10px;
+    border: 1px solid var(--line-soft);
+}
+.profile-box h2 {
+    margin: 0 0 14px;
+    font-size: 15px;
+    font-weight: 600;
+}
+.profile-box .post-list li {
+    padding: 12px 0;
+}
+.profile-box .comment-list {
+    margin-bottom: 0;
+}
+.profile-box .empty {
+    padding: 28px 0;
+}
+
+@media (max-width: 700px) {
+    .profile-columns {
+        grid-template-columns: 1fr;
+        gap: 18px;
+    }
+}

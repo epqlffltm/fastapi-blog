@@ -8,49 +8,56 @@
 OTP 발급/검증, 비밀번호 재설정
 httpOnly 쿠키 로그인 / 로그아웃
 회원 목록 · 권한 · 정지 · 강퇴
+
+2026-07-28
+프로필 댓글 목록 API 추가
 '''
 
 from datetime import datetime, timedelta, timezone
 
 from fastapi import (
-    APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, UploadFile,
+    APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, UploadFile,
 )
 from sqlalchemy.exc import IntegrityError
 from ..database.connection import settings
 from ..database.orm import User
-from ..database.repository import UserRepository
+from ..database.repository import UserRepository, CommentRepository
 from ..schema.request import (
     SignUpRequest, LogInRequest, VerifyOTPRequest,
     ResetPasswordRequest, ResetPasswordVerifyRequest,
     PermissionUpdateRequest, SuspendRequest, BanRequest,
     ProfileUpdateRequest, PasswordChangeRequest,
 )
-from ..schema.response import ListUserSchema, UserSchema, PublicUserSchema
+from ..schema.response import (
+    ListUserSchema, UserSchema, PublicUserSchema,
+    ListUserCommentSchema, UserCommentItemSchema, PostBriefSchema, UserBriefSchema,
+)
 from ..service.auth import AuthService
 from ..service.upload import UploadService
 from ..service.email import EmailService
 from ..service.otp import OTPService
 from ..service.ratelimit import LoginRateLimitService
-from .dependency import get_current_user, get_active_user, require_permission, COOKIE_NAME
+from .dependency import (
+    get_current_user, get_active_user, require_permission,
+    get_current_user_optional, COOKIE_NAME,
+)
 
 router = APIRouter(prefix="/user", tags=["user"])
 
 
-@router.post("/sign-up", status_code=201, response_model=UserSchema)#회원가입
+@router.post("/sign-up", status_code=201, response_model=UserSchema)
 async def sign_up_handler(
     request: SignUpRequest,
     user_repo: UserRepository = Depends(),
     auth_service: AuthService = Depends(),
 ):
-    # 이메일 중복 확인
     if await user_repo.get_user_by_email(request.email) is not None:
         raise HTTPException(status_code=409, detail="email already exists")
 
-    # 닉네임 중복 확인
     if await user_repo.get_user_by_nickname(request.nickname) is not None:
         raise HTTPException(status_code=409, detail="nickname already exists")
 
-    hashed = auth_service.hash_password(request.password)   # 평문 저장 금지
+    hashed = auth_service.hash_password(request.password)
     user = User.create(
         email=request.email,
         hashed_password=hashed,
@@ -59,14 +66,13 @@ async def sign_up_handler(
     try:
         return await user_repo.save_user(user)
     except IntegrityError as exc:
-        # 사전 중복 조회 뒤 다른 요청이 먼저 저장한 경쟁 상태
         raise HTTPException(
             status_code=409,
             detail="email or nickname already exists",
         ) from exc
 
 
-@router.post("/log-in", status_code=200, response_model=UserSchema)#로그인
+@router.post("/log-in", status_code=200, response_model=UserSchema)
 async def log_in_handler(
     request: LogInRequest,
     response: Response,
@@ -75,18 +81,12 @@ async def log_in_handler(
     auth_service: AuthService = Depends(),
     rate_limit: LoginRateLimitService = Depends(),
 ):
-    # 프록시(ALB·nginx) 뒤에 두면 프록시 IP 가 잡힌다.
-    # 배포 시 --proxy-headers 로 X-Forwarded-For 를 신뢰하게 해야 한다
     ip = http_request.client.host if http_request.client else "unknown"
 
-    # 비밀번호 검증 전에 막는다. bcrypt 는 의도적으로 느려서,
-    # 어차피 거절할 요청에 해시를 태우면 그게 CPU 고갈 통로가 된다
     if await rate_limit.is_blocked(request.email, ip):
         raise HTTPException(status_code=429, detail="too many login attempts")
 
     user = await user_repo.get_user_by_email(request.email)
-    # 이메일이 없든 비번이 틀리든 같은 메시지 (계정 존재 여부 노출 방지).
-    # 실패 기록도 똑같이 남긴다 — 없는 계정만 빨리 응답하면 그 차이로 가입 여부가 샌다
     if user is None:
         await rate_limit.record_failure(request.email, ip)
         raise HTTPException(status_code=401, detail="invalid email or password")
@@ -94,25 +94,22 @@ async def log_in_handler(
         await rate_limit.record_failure(request.email, ip)
         raise HTTPException(status_code=401, detail="invalid email or password")
 
-    # 성공했으므로 이 계정의 실패 기록을 지운다 (IP 쪽은 남긴다)
     await rate_limit.reset(request.email)
 
-    # 제재된 계정도 로그인은 시킨다. 본인이 상태를 확인할 수 있어야 한다
     response.set_cookie(
         key=COOKIE_NAME,
         value=auth_service.create_jwt(user.id),
-        httponly=True,                      # JS가 읽을 수 없다 (XSS 방어)
-        secure=settings.cookie_secure,      # HTTPS 전용 (배포 시 true)
-        samesite="strict",                  # 다른 사이트발 요청엔 안 붙는다 (CSRF 방어)
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite="strict",
         max_age=settings.cookie_max_age,
         path="/",
     )
-    return user       # 프론트가 권한·제재 상태를 바로 쓸 수 있게 회원 정보를 반환
+    return user
 
 
-@router.post("/log-out", status_code=200)#로그아웃
+@router.post("/log-out", status_code=200)
 async def log_out_handler(response: Response):
-    # 쿠키를 지울 때도 발급 때와 같은 속성을 줘야 브라우저가 같은 쿠키로 인식한다
     response.delete_cookie(
         key=COOKIE_NAME,
         httponly=True,
@@ -123,20 +120,19 @@ async def log_out_handler(response: Response):
     return {"message": "logged out"}
 
 
-@router.get("/me", status_code=200, response_model=UserSchema)#내 정보
+@router.get("/me", status_code=200, response_model=UserSchema)
 async def get_me_handler(
     current_user: User = Depends(get_current_user),
 ):
     return current_user
 
 
-@router.patch("/me", status_code=200, response_model=UserSchema)#내 정보 수정
+@router.patch("/me", status_code=200, response_model=UserSchema)
 async def update_me_handler(
     request: ProfileUpdateRequest,
     current_user: User = Depends(get_current_user),
     user_repo: UserRepository = Depends(),
 ):
-    # 닉네임을 바꾸면 다른 사람이 이미 쓰는지 확인한다 (자기 자신은 예외)
     nickname_changed = (
         request.nickname is not None
         and request.nickname != current_user.nickname
@@ -147,7 +143,6 @@ async def update_me_handler(
             raise HTTPException(status_code=409, detail="nickname already exists")
         current_user.nickname = request.nickname
 
-    # bio 는 빈 문자열이면 소개를 지우는 것. None 이면 안 건드린다
     if request.bio is not None:
         current_user.bio = request.bio
 
@@ -162,14 +157,13 @@ async def update_me_handler(
         raise
 
 
-@router.post("/me/password/otp", status_code=200)#비밀번호 변경용 코드 발송
+@router.post("/me/password/otp", status_code=200)
 async def send_password_change_otp_handler(
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     otp_service: OTPService = Depends(),
     email_service: EmailService = Depends(),
 ):
-    # 로그인된 본인의 이메일로만 보낸다 (요청에서 이메일을 안 받아, 남의 주소로 못 보냄)
     if not await otp_service.acquire_send_slot(current_user.email, purpose="password_change"):
         raise HTTPException(status_code=429, detail="too many requests")
 
@@ -181,7 +175,7 @@ async def send_password_change_otp_handler(
     return {"message": "a code has been sent to your email"}
 
 
-@router.patch("/me/password", status_code=200)#비밀번호 변경 (현재 비번 + 이메일 OTP)
+@router.patch("/me/password", status_code=200)
 async def change_password_handler(
     request: PasswordChangeRequest,
     current_user: User = Depends(get_current_user),
@@ -189,11 +183,9 @@ async def change_password_handler(
     auth_service: AuthService = Depends(),
     otp_service: OTPService = Depends(),
 ):
-    # 1) 현재 비번 확인 — 비번이 유출돼도 현재 비번을 모르면 막힌다
     if not auth_service.verify_password(request.current_password, current_user.password):
         raise HTTPException(status_code=403, detail="current password does not match")
 
-    # 2) 이메일 OTP 확인 — 비번을 알고 로그인했어도 이메일 계정까지 못 뚫으면 막힌다 (2차 인증)
     saved = await otp_service.get_otp(current_user.email, purpose="password_change")
     if saved is None:
         raise HTTPException(status_code=400, detail="otp expired or not issued")
@@ -202,37 +194,80 @@ async def change_password_handler(
 
     current_user.password = auth_service.hash_password(request.new_password)
     await user_repo.update_user(current_user)
-    await otp_service.delete_otp(current_user.email, purpose="password_change")   # 재사용 방지
+    await otp_service.delete_otp(current_user.email, purpose="password_change")
     return {"message": "password changed"}
 
 
-@router.post("/me/avatar", status_code=200, response_model=UserSchema)#프로필 이미지 업로드
+@router.post("/me/avatar", status_code=200, response_model=UserSchema)
 async def upload_avatar_handler(
     file: UploadFile,
-    # 자기 프로필 이미지라 can_upload(글 이미지용) 대신 로그인+정상 회원이면 허용
     current_user: User = Depends(get_active_user),
     user_repo: UserRepository = Depends(),
     upload_service: UploadService = Depends(),
 ):
-    # 저장·검증(타입/크기)은 글 이미지와 같은 서비스를 재활용한다
     filename, _size = await upload_service.save(file)
     current_user.avatar_url = f"/img/{filename}"
     return await user_repo.update_user(current_user)
 
 
-@router.get("/{id}/profile", status_code=200, response_model=PublicUserSchema)#남의 공개 프로필
+@router.get("/{id}/profile", status_code=200, response_model=PublicUserSchema)
 async def get_public_profile_handler(
     id: int,
     user_repo: UserRepository = Depends(),
 ):
-    # 로그인 불필요(공개). 공개 정보만 담은 PublicUserSchema 로 응답 → 이메일·권한은 안 새어나간다
     user = await user_repo.get_user_by_id(id)
     if user is None:
         raise HTTPException(status_code=404, detail="user not found")
     return user
 
 
-@router.get("/list", status_code=200, response_model=ListUserSchema)#회원 목록
+@router.get("/{id}/comments", status_code=200, response_model=ListUserCommentSchema)
+async def get_user_comments_handler(
+    id: int,
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=20, ge=1, le=50),
+    viewer: User | None = Depends(get_current_user_optional),
+    comment_repo: CommentRepository = Depends(),
+    user_repo: UserRepository = Depends(),
+):
+    user = await user_repo.get_user_by_id(id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="user not found")
+
+    include_deleted = viewer is not None and viewer.can_manage_post
+
+    rows, total = await comment_repo.get_comments_by_user(
+        user_id=id,
+        page=page,
+        size=size,
+        include_deleted=include_deleted,
+    )
+
+    items = []
+    for comment, post in rows:
+        items.append(
+            UserCommentItemSchema(
+                id=comment.id,
+                contents=comment.contents,
+                is_deleted=comment.is_deleted,
+                created_at=comment.created_at,
+                parent_id=comment.parent_id,
+                post=PostBriefSchema.model_validate(post),
+                parent_user=None,
+            )
+        )
+
+    total_pages = (total + size - 1) // size if size else 0
+    return ListUserCommentSchema(
+        comments=items,
+        page=page,
+        size=size,
+        total=total,
+        total_pages=total_pages,
+    )
+
+
+@router.get("/list", status_code=200, response_model=ListUserSchema)
 async def get_users_handler(
     current_user: User = Depends(require_permission("can_manage_user")),
     user_repo: UserRepository = Depends(),
@@ -241,14 +276,13 @@ async def get_users_handler(
     return ListUserSchema(users=users)
 
 
-@router.patch("/{id}/permissions", status_code=200, response_model=UserSchema)#권한 변경
+@router.patch("/{id}/permissions", status_code=200, response_model=UserSchema)
 async def update_permissions_handler(
     id: int,
     request: PermissionUpdateRequest,
     current_user: User = Depends(require_permission("can_manage_user")),
     user_repo: UserRepository = Depends(),
 ):
-    # 자기 권한은 못 바꾼다. 마지막 관리자가 스스로 내리면 아무도 되돌릴 수 없다
     if id == current_user.id:
         raise HTTPException(status_code=400, detail="cannot change your own permissions")
 
@@ -256,14 +290,13 @@ async def update_permissions_handler(
     if user is None:
         raise HTTPException(status_code=404, detail="user not found")
 
-    # 보내온 항목만 반영한다 (None 은 "안 건드림")
     for name, value in request.model_dump(exclude_none=True).items():
         setattr(user, name, value)
 
     return await user_repo.update_user(user)
 
 
-@router.patch("/{id}/suspend", status_code=200, response_model=UserSchema)#정지
+@router.patch("/{id}/suspend", status_code=200, response_model=UserSchema)
 async def suspend_handler(
     id: int,
     request: SuspendRequest,
@@ -284,7 +317,7 @@ async def suspend_handler(
     return await user_repo.update_user(user)
 
 
-@router.patch("/{id}/ban", status_code=200, response_model=UserSchema)#강퇴
+@router.patch("/{id}/ban", status_code=200, response_model=UserSchema)
 async def ban_handler(
     id: int,
     request: BanRequest,
@@ -302,7 +335,7 @@ async def ban_handler(
     return await user_repo.update_user(user)
 
 
-@router.post("/email/otp", status_code=200)#인증코드 발급
+@router.post("/email/otp", status_code=200)
 async def create_otp_handler(
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
@@ -317,13 +350,12 @@ async def create_otp_handler(
     otp = otp_service.create_otp()
     await otp_service.save_otp(email=current_user.email, otp=otp, purpose="signup")
 
-    # 메일 발송은 느리므로 응답을 먼저 보내고 뒤에서 처리
     background_tasks.add_task(email_service.send_otp, current_user.email, otp)
 
     return {"email": current_user.email, "expires_in": otp_service.ttl}
 
 
-@router.post("/email/otp/verify", status_code=200, response_model=UserSchema)#인증코드 검증
+@router.post("/email/otp/verify", status_code=200, response_model=UserSchema)
 async def verify_otp_handler(
     request: VerifyOTPRequest,
     current_user: User = Depends(get_current_user),
@@ -331,19 +363,19 @@ async def verify_otp_handler(
     user_repo: UserRepository = Depends(),
 ):
     saved = await otp_service.get_otp(current_user.email, purpose="signup")
-    if saved is None:      # 발급 안 했거나 3분이 지나 만료됨
+    if saved is None:
         raise HTTPException(status_code=400, detail="otp expired or not issued")
     if saved != request.otp:
         raise HTTPException(status_code=400, detail="invalid otp")
 
     current_user.is_verified = True
     await user_repo.update_user(current_user)
-    await otp_service.delete_otp(current_user.email, purpose="signup")   # 1회용이므로 즉시 폐기
+    await otp_service.delete_otp(current_user.email, purpose="signup")
 
     return current_user
 
 
-@router.post("/password/reset", status_code=200)#비번 재설정 코드 발송
+@router.post("/password/reset", status_code=200)
 async def reset_password_handler(
     request: ResetPasswordRequest,
     background_tasks: BackgroundTasks,
@@ -351,7 +383,6 @@ async def reset_password_handler(
     otp_service: OTPService = Depends(),
     email_service: EmailService = Depends(),
 ):
-    # 계정이 없어도 있는 것처럼 응답한다 (가입 여부 노출 방지)
     user = await user_repo.get_user_by_email(request.email)
     if user is not None and await otp_service.acquire_send_slot(request.email, purpose="reset"):
         otp = otp_service.create_otp()
@@ -363,7 +394,7 @@ async def reset_password_handler(
     return {"message": "if the email exists, a code has been sent"}
 
 
-@router.post("/password/reset/verify", status_code=200)#비번 재설정 실행
+@router.post("/password/reset/verify", status_code=200)
 async def reset_password_verify_handler(
     request: ResetPasswordVerifyRequest,
     user_repo: UserRepository = Depends(),
@@ -377,7 +408,7 @@ async def reset_password_verify_handler(
         raise HTTPException(status_code=400, detail="invalid otp")
 
     user = await user_repo.get_user_by_email(request.email)
-    if user is None:      # 코드 발급 후 탈퇴한 경우
+    if user is None:
         raise HTTPException(status_code=400, detail="invalid otp")
 
     user.password = auth_service.hash_password(request.new_password)

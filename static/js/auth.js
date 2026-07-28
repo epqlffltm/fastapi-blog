@@ -1,16 +1,15 @@
 // 2026-07-24 로그인 상태 확인 및 헤더 렌더링
 // 2026-07-26 닉네임 → 내 정보(/profile) 링크 / 헤더 avatar 표시
+// 2026-07-28 헤더 닉네임은 항상 /profile 로 이동
 
-// 쿠키는 JS가 읽을 수 없으므로, 로그인 여부는 서버에 물어봐야 안다
 async function getCurrentUser() {
     try {
         return await api.get("/user/me");
     } catch {
-        return null;      // 401 등 → 비로그인
+        return null;
     }
 }
 
-// 화면 표시용 판단. 실제 차단은 언제나 서버가 한다
 function can(user, permission) {
     return user !== null && user[permission] === true;
 }
@@ -23,11 +22,15 @@ function canManage(user) {
     return can(user, "can_manage_user") || can(user, "can_manage_category");
 }
 
+// 전역으로 현재 로그인 유저 보관 (다른 스크립트에서 작성자 링크 판단용)
+window.currentUser = null;
+
 async function renderHeader() {
     const nav = document.querySelector("header nav");
     if (!nav) return null;
 
     const user = await getCurrentUser();
+    window.currentUser = user;
     nav.replaceChildren();
 
     if (user) {
@@ -45,7 +48,6 @@ async function renderHeader() {
             nav.append(admin);
         }
 
-        // 제재 상태는 숨기지 않는다. 본인이 알아야 문의할 수 있다
         if (!isActive(user)) {
             const state = document.createElement("span");
             state.className = "state-banner";
@@ -55,13 +57,11 @@ async function renderHeader() {
             nav.append(state);
         }
 
-        // 닉네임을 누르면 내 프로필로 간다.
-        // 남의 프로필과 같은 화면이라 "남에게 어떻게 보이는지"를 그대로 확인할 수 있다.
-        // 설정(닉네임·소개·아바타·비밀번호)은 그 화면의 설정 버튼으로 들어간다
+        // ★ 헤더 닉네임은 항상 /profile 로
         const name = document.createElement("a");
         name.className = "who";
-        name.href = `/user/${user.id}`;
-        // avatar 가 있으면 닉네임 앞에 작은 원형 이미지
+        name.href = "/profile";
+
         if (user.avatar_url) {
             const av = document.createElement("img");
             av.className = "who-avatar";
@@ -69,7 +69,7 @@ async function renderHeader() {
             av.alt = "";
             name.append(av);
         }
-        name.append(document.createTextNode(user.nickname));   // 태그 실행 안 되게 텍스트 노드
+        name.append(document.createTextNode(user.nickname));
 
         const logout = document.createElement("button");
         logout.textContent = "로그아웃";
@@ -98,4 +98,12 @@ function formatDate(iso) {
     return d.toLocaleDateString("ko-KR", {
         year: "numeric", month: "2-digit", day: "2-digit",
     });
+}
+
+// 작성자 링크 헬퍼: 내 아이디면 /profile, 아니면 /user/{id}
+function authorHref(userId) {
+    if (window.currentUser && window.currentUser.id === userId) {
+        return "/profile";
+    }
+    return `/user/${userId}`;
 }
