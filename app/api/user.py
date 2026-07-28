@@ -12,6 +12,7 @@ httpOnly 쿠키 로그인 / 로그아웃
 2026-07-28
 프로필 댓글 목록 API 추가
 bcrypt 해싱·검증을 thread pool로 이동
+OTP 원자 검증·소비 / 비밀번호 변경 시 기존 세션 무효화
 '''
 
 from datetime import datetime, timedelta, timezone
@@ -36,7 +37,7 @@ from ..schema.response import (
 from ..service.auth import AuthService
 from ..service.upload import UploadService
 from ..service.email import EmailService
-from ..service.otp import OTPService
+from ..service.otp import OTPService, OTPVerifyResult
 from ..service.ratelimit import LoginRateLimitService
 from .dependency import (
     get_current_user, get_active_user, require_permission,
@@ -44,6 +45,26 @@ from .dependency import (
 )
 
 router = APIRouter(prefix="/user", tags=["user"])
+
+
+def _delete_access_cookie(response: Response) -> None:
+    response.delete_cookie(
+        key=COOKIE_NAME,
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite="strict",
+        path="/",
+    )
+
+
+def _require_verified_otp(result: OTPVerifyResult) -> None:
+    if result is OTPVerifyResult.VERIFIED:
+        return
+    if result is OTPVerifyResult.EXPIRED_OR_MISSING:
+        raise HTTPException(status_code=400, detail="otp expired or not issued")
+    if result is OTPVerifyResult.TOO_MANY_ATTEMPTS:
+        raise HTTPException(status_code=429, detail="too many otp attempts")
+    raise HTTPException(status_code=400, detail="invalid otp")
 
 
 @router.post("/sign-up", status_code=201, response_model=UserSchema)
@@ -99,7 +120,7 @@ async def log_in_handler(
 
     response.set_cookie(
         key=COOKIE_NAME,
-        value=auth_service.create_jwt(user.id),
+        value=auth_service.create_jwt(user.id, token_version=int(user.token_version or 0)),
         httponly=True,
         secure=settings.cookie_secure,
         samesite="strict",
@@ -111,13 +132,7 @@ async def log_in_handler(
 
 @router.post("/log-out", status_code=200)
 async def log_out_handler(response: Response):
-    response.delete_cookie(
-        key=COOKIE_NAME,
-        httponly=True,
-        secure=settings.cookie_secure,
-        samesite="strict",
-        path="/",
-    )
+    _delete_access_cookie(response)
     return {"message": "logged out"}
 
 
@@ -179,6 +194,7 @@ async def send_password_change_otp_handler(
 @router.patch("/me/password", status_code=200)
 async def change_password_handler(
     request: PasswordChangeRequest,
+    response: Response,
     current_user: User = Depends(get_current_user),
     user_repo: UserRepository = Depends(),
     auth_service: AuthService = Depends(),
@@ -189,15 +205,19 @@ async def change_password_handler(
     ):
         raise HTTPException(status_code=403, detail="current password does not match")
 
-    saved = await otp_service.get_otp(current_user.email, purpose="password_change")
-    if saved is None:
-        raise HTTPException(status_code=400, detail="otp expired or not issued")
-    if saved != request.otp:
-        raise HTTPException(status_code=400, detail="invalid otp")
+    otp_result = await otp_service.verify_and_consume(
+        current_user.email,
+        request.otp,
+        purpose="password_change",
+    )
+    _require_verified_otp(otp_result)
 
     current_user.password = await auth_service.hash_password_async(request.new_password)
+    current_user.token_version = int(current_user.token_version or 0) + 1
     await user_repo.update_user(current_user)
-    await otp_service.delete_otp(current_user.email, purpose="password_change")
+
+    # 현재 쿠키도 즉시 제거하고, 다른 브라우저의 토큰은 token_version 비교로 거부한다.
+    _delete_access_cookie(response)
     return {"message": "password changed"}
 
 
@@ -365,16 +385,15 @@ async def verify_otp_handler(
     otp_service: OTPService = Depends(),
     user_repo: UserRepository = Depends(),
 ):
-    saved = await otp_service.get_otp(current_user.email, purpose="signup")
-    if saved is None:
-        raise HTTPException(status_code=400, detail="otp expired or not issued")
-    if saved != request.otp:
-        raise HTTPException(status_code=400, detail="invalid otp")
+    otp_result = await otp_service.verify_and_consume(
+        current_user.email,
+        request.otp,
+        purpose="signup",
+    )
+    _require_verified_otp(otp_result)
 
     current_user.is_verified = True
     await user_repo.update_user(current_user)
-    await otp_service.delete_otp(current_user.email, purpose="signup")
-
     return current_user
 
 
@@ -404,18 +423,18 @@ async def reset_password_verify_handler(
     otp_service: OTPService = Depends(),
     auth_service: AuthService = Depends(),
 ):
-    saved = await otp_service.get_otp(request.email, purpose="reset")
-    if saved is None:
-        raise HTTPException(status_code=400, detail="otp expired or not issued")
-    if saved != request.otp:
-        raise HTTPException(status_code=400, detail="invalid otp")
+    otp_result = await otp_service.verify_and_consume(
+        request.email,
+        request.otp,
+        purpose="reset",
+    )
+    _require_verified_otp(otp_result)
 
     user = await user_repo.get_user_by_email(request.email)
     if user is None:
         raise HTTPException(status_code=400, detail="invalid otp")
 
     user.password = await auth_service.hash_password_async(request.new_password)
+    user.token_version = int(user.token_version or 0) + 1
     await user_repo.update_user(user)
-    await otp_service.delete_otp(request.email, purpose="reset")
-
     return {"message": "password changed"}
