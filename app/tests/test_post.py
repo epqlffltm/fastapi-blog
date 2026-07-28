@@ -101,7 +101,6 @@ def test_get_pages(client, mock_post_repo, mock_category_repo, mock_like_repo):
     assert data["total_pages"] == 1
 
     # 댓글·좋아요 수는 repository의 집계 쿼리 결과를 사용한다.
-    mock_post_repo.count_comments.assert_not_called()
     mock_like_repo.count_for_post.assert_not_called()
 
 
@@ -218,7 +217,6 @@ def test_get_pages_unknown_category(client, mock_post_repo, mock_category_repo):
 # ---------- 단일 조회 ----------
 
 def test_get_page(client, mock_post_repo, mock_redis):
-    post = _make_post()
     mock_post_repo.get_post_by_id.return_value = _make_post()
     mock_redis.set.return_value = True
     mock_post_repo.increment_view_count.return_value = 1

@@ -33,3 +33,16 @@ htmlcov/
 # OS
 .DS_Store
 Thumbs.db
+
+# 로컬 DB 파일
+*.db
+*.sqlite
+*.sqlite3
+
+# 사용자 업로드 — 런타임 데이터이지 소스가 아니다.
+# 커밋하면 저장소가 계속 불어나고, 한번 들어간 파일은 이력에 영원히 남는다
+static/img/*
+!static/img/.gitkeep
+
+# 에디터 자산은 버전 고정을 위해 커밋한다 (scripts/vendor_toastui.py 로 생성)
+!static/vendor/

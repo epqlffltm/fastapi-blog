@@ -67,13 +67,18 @@ jobs:
         run: uv run python -m compileall -q app alembic
 
       - name: Ruff correctness check
-        run: uvx ruff check --select E9,F63,F7,F82 app alembic
+        run: uvx ruff check --select E9,F63,F7,F82,F401 app alembic
 
       - name: Migration round-trip
         run: |
           uv run alembic upgrade head
           uv run alembic downgrade base
           uv run alembic upgrade head
+
+      - name: Dependency vulnerability audit
+        # 잠긴 의존성에 알려진 취약점이 있는지 본다.
+        # 코드가 멀쩡해도 라이브러리로 들어오는 구멍이 있다
+        run: uvx pip-audit --strict --progress-spinner off
 
       - name: Unit tests
         run: uv run pytest --strict-markers -m "not integration"

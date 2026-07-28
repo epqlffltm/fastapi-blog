@@ -391,7 +391,7 @@ def test_jwt_roundtrip():
     service = AuthService()
     token = service.create_jwt(user_id=42)
 
-    assert service.decode_jwt(token) == 42
+    assert service.decode_jwt_claims(token).user_id == 42
 
 
 def test_decode_expired_token():
@@ -403,7 +403,7 @@ def test_decode_expired_token():
     )
 
     with pytest.raises(jwt.ExpiredSignatureError):
-        service.decode_jwt(expired)
+        service.decode_jwt_claims(expired)
 
 
 def test_decode_tampered_token():
@@ -415,7 +415,7 @@ def test_decode_tampered_token():
     )
 
     with pytest.raises(jwt.InvalidSignatureError):
-        service.decode_jwt(forged)
+        service.decode_jwt_claims(forged)
         
 def test_change_password(auth_client, mock_user_repo, current_user, mock_redis):
     """현재 비번 + 올바른 OTP → 변경"""

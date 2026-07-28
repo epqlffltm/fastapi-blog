@@ -24,6 +24,7 @@ from pydantic import BaseModel, ConfigDict, model_validator
 from datetime import datetime
 
 
+# 작성자 요약 (닉네임 표시용)
 class UserBriefSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -31,6 +32,7 @@ class UserBriefSchema(BaseModel):
     nickname: str
 
 
+# 분류 (글에 딸려 나가는 형태) — 아래에서 참조하므로 먼저 정의한다
 class CategorySchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -39,6 +41,7 @@ class CategorySchema(BaseModel):
     name: str
 
 
+# 사이드바용 (글 개수는 Category 에 없는 값이라 핸들러가 직접 채운다)
 class CategoryListItemSchema(BaseModel):
     id: int
     slug: str
@@ -50,6 +53,7 @@ class ListCategorySchema(BaseModel):
     categories: list[CategoryListItemSchema]
 
 
+# 목록의 글 하나 (댓글 수 포함)
 class PostListItemSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -65,6 +69,7 @@ class PostListItemSchema(BaseModel):
     like_count: int
 
 
+# 목록 전체
 class ListPostSchema(BaseModel):
     posts: list[PostListItemSchema]
     page: int
@@ -73,6 +78,7 @@ class ListPostSchema(BaseModel):
     total_pages: int
 
 
+# 댓글 하나
 class CommentSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -85,12 +91,15 @@ class CommentSchema(BaseModel):
 
     @model_validator(mode="after")
     def hide_deleted(self):
+        # 자리표시자로 남은 댓글의 내용과 작성자는 내보내지 않는다.
+        # 핸들러가 아니라 스키마가 막아야 어느 경로로 만들어도 새지 않는다
         if self.is_deleted:
             self.user = None
             self.contents = ""
         return self
 
 
+# 글 상세 (본문은 마크다운, 이미지는 그 안에 있다)
 class PostDetailSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -106,11 +115,14 @@ class PostDetailSchema(BaseModel):
     view_count: int
 
 
+# 좋아요 토글 / 상태 조회 응답
 class LikeResultSchema(BaseModel):
     like_count: int
-    liked: bool
+    liked: bool          # 지금 보는 사람이 눌렀는지
 
 
+# 남의 프로필용 — 공개해도 되는 정보만.
+# 이메일·권한·제재상태는 이 스키마에 '없어서' 실수로도 나갈 수 없다
 class PublicUserSchema(BaseModel):
     id: int
     nickname: str
@@ -172,6 +184,8 @@ class UserCommentItemSchema(BaseModel):
 
     @model_validator(mode="after")
     def hide_deleted(self):
+        # 자리표시자로 남은 댓글의 내용과 작성자는 내보내지 않는다.
+        # 핸들러가 아니라 스키마가 막아야 어느 경로로 만들어도 새지 않는다
         if self.is_deleted:
             self.contents = ""
         return self

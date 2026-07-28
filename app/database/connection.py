@@ -22,7 +22,7 @@ JWT 비밀키 길이와 알고리즘 검증 추가
 from ipaddress import ip_network
 from typing import Literal
 
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict

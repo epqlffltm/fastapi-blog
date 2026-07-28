@@ -8,8 +8,13 @@ JWT 발급/검증 추가
 2026-07-28
 bcrypt UTF-8 바이트 제한 검증 / async 라우터용 thread pool 래퍼
 JWT token_version 클레임 추가
+
+2026-07-29
+계정 부재 시 타이밍 노출 방지용 더미 해시
+decode_jwt 래퍼 제거 (decode_jwt_claims 하나로 통일)
 '''
 
+import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
@@ -22,6 +27,15 @@ from .password import (
     is_bcrypt_password_length_valid,
     validate_bcrypt_password_length,
 )
+
+
+# 존재하지 않는 계정으로 로그인이 들어와도 bcrypt 를 똑같이 한 번 태우기 위한 해시.
+# 모듈 로드 시 한 번만 만든다 — 요청마다 만들면 그 자체가 비용이다.
+# 어떤 비밀번호와도 일치하지 않아야 하므로 임의 바이트로 해싱한다
+_DUMMY_PASSWORD_HASH: str = bcrypt.hashpw(
+    secrets.token_bytes(32),
+    salt=bcrypt.gensalt(),
+).decode("UTF-8")
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +78,15 @@ class AuthService:
             plain_password.encode(self.encoding),
             hashed_password.encode(self.encoding),
         )
+
+    async def verify_dummy_password(self, plain_password: str) -> None:
+        """계정이 없을 때도 같은 비용을 치러 응답 시간 차이를 없앤다.
+
+        이메일이 없으면 bcrypt 를 건너뛰게 되어 응답이 60배 가까이 빨라진다.
+        메시지를 통일해도 시간이 가입 여부를 알려주므로, 결과를 버리더라도
+        검증을 한 번 수행한다.
+        """
+        await self.verify_password_async(plain_password, _DUMMY_PASSWORD_HASH)
 
     async def verify_password_async(
         self,
@@ -109,7 +132,3 @@ class AuthService:
             raise jwt.InvalidTokenError("invalid token claims")
 
         return JWTClaims(user_id=user_id, token_version=token_version)
-
-    def decode_jwt(self, access_token: str) -> int:
-        """기존 호출부 호환용. 사용자 ID만 반환한다."""
-        return self.decode_jwt_claims(access_token).user_id

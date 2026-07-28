@@ -32,6 +32,10 @@ LikeRepository (좋아요 추가/삭제/카운트/존재확인)
 
 2026-07-28
 유저별 댓글 목록 조회 추가
+
+2026-07-29
+유저별 댓글 조회는 ProfileCommentRepository 로 이관.
+여기 있던 판본은 글의 삭제 여부를 보지 않아 삭제된 글의 댓글이 새어나갔다
 '''
 
 from contextlib import asynccontextmanager
@@ -169,13 +173,6 @@ class PostRepository:
             stmt = stmt.execution_options(populate_existing=True)
         return await self.session.scalar(stmt)
 
-    async def count_comments(self, post_id: int) -> int:
-        return await self.session.scalar(
-            select(func.count(Comment.id))
-            .where(Comment.post_id == post_id)
-            .where(Comment.is_deleted == False)
-        )
-
     async def save(self, post: Post) -> Post:
         async with _write_transaction(self.session):
             self.session.add(post)
@@ -222,38 +219,6 @@ class CommentRepository:
         await self.session.refresh(comment)
         return comment
 
-    async def get_comments_by_user(
-        self,
-        user_id: int,
-        page: int = 1,
-        size: int = 20,
-        include_deleted: bool = False,
-    ) -> tuple[list[tuple], int]:
-        """
-        유저가 작성한 댓글 + 소속 글 정보
-        반환: ([(Comment, Post), ...], total)
-        """
-        filters = [Comment.user_id == user_id]
-        if not include_deleted:
-            filters.append(Comment.is_deleted.is_(False))
-
-        total = await self.session.scalar(
-            select(func.count(Comment.id)).where(*filters)
-        )
-
-        stmt = (
-            select(Comment, Post)
-            .join(Post, Post.id == Comment.post_id)
-            .where(*filters)
-            .order_by(Comment.created_at.desc(), Comment.id.desc())
-            .offset((page - 1) * size)
-            .limit(size)
-            .options(noload(Comment.user))
-        )
-
-        result = await self.session.execute(stmt)
-        rows = [(row[0], row[1]) for row in result.all()]
-        return rows, int(total or 0)
 
 
 class UserRepository:
@@ -313,12 +278,6 @@ class CategoryRepository:
 
     async def get_category_by_id(self, id: int) -> Category | None:
         return await self.session.scalar(select(Category).where(Category.id == id))
-
-    async def count_posts(self, category_id: int) -> int:
-        # 소프트삭제된 글도 category_id 로 FK 를 물고 있으므로 is_deleted 를 가리지 않는다
-        return await self.session.scalar(
-            select(func.count(Post.id)).where(Post.category_id == category_id)
-        )
 
     async def save(self, category: Category) -> Category:
         async with _write_transaction(self.session):

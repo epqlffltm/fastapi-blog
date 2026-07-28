@@ -11,6 +11,9 @@ OTP 서비스 (생성 / Redis 임시 저장 / 검증)
 2026-07-28
 Redis 비동기 전환
 OTP 검증 횟수 제한 / 검증 성공 시 원자적 소비
+
+2026-07-29
+호환용 메서드 제거 — get_otp 는 검증 횟수 제한을 우회하는 경로였다
 '''
 
 import secrets
@@ -104,13 +107,6 @@ class OTPService:
         )
 
         return result == 1
-
-    async def start_cooldown(self, email: str, purpose: str) -> bool:
-        """기존 호출부 호환용."""
-        return await self.acquire_send_slot(
-            email=email,
-            purpose=purpose,
-        )
 
     async def save_otp(
         self,
@@ -207,23 +203,3 @@ class OTPService:
             return OTPVerifyResult(int(raw_result))
         except (TypeError, ValueError) as exc:
             raise RuntimeError(f"unexpected OTP verification result: {raw_result!r}") from exc
-
-    async def get_otp(
-        self,
-        email: str,
-        purpose: str,
-    ) -> int | None:
-        """호환용 조회 메서드. 실제 검증은 verify_and_consume()을 사용한다."""
-        value = await self.redis.get(self._key(email, purpose))
-        return int(value) if value is not None else None
-
-    async def delete_otp(
-        self,
-        email: str,
-        purpose: str,
-    ) -> None:
-        """OTP와 검증 실패 횟수를 함께 삭제한다."""
-        await self.redis.delete(
-            self._key(email, purpose),
-            self._verify_attempt_key(email, purpose),
-        )

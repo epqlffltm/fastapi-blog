@@ -37,7 +37,7 @@ from ..schema.request import (
 )
 from ..schema.response import (
     ListUserSchema, UserSchema, PublicUserSchema,
-    ListUserCommentSchema, UserCommentItemSchema, PostBriefSchema, UserBriefSchema,
+    ListUserCommentSchema, UserCommentItemSchema, PostBriefSchema,
 )
 from ..service.auth import AuthService
 from ..service.client_ip import get_client_ip
@@ -117,6 +117,9 @@ async def log_in_handler(
 
     user = await user_repo.get_user_by_email(request.email)
     if user is None:
+        # 메시지를 통일해도 응답 시간이 가입 여부를 알려준다.
+        # 계정이 없으면 bcrypt 를 건너뛰어 60배 가까이 빨라지므로 같은 비용을 치른다
+        await auth_service.verify_dummy_password(request.password)
         await rate_limit.record_failure(request.email, ip)
         raise HTTPException(status_code=401, detail="invalid email or password")
     if not await auth_service.verify_password_async(request.password, user.password):
