@@ -49,6 +49,12 @@ class Settings(BaseSettings):
     db_echo: bool = False    # 배포에선 False, 로컬 디버깅 때만 True
     trusted_proxy_cidrs: str = ""  # 쉼표 구분. 비어 있으면 전달 IP 헤더를 신뢰하지 않음
 
+    # 시드 스크립트(python -m app.seed)용. 앱 실행에는 쓰이지 않는다.
+    # extra="forbid" 라서, .env 에 두려면 여기에 선언되어 있어야 한다
+    seed_admin_email: str = ""       # 비우면 smtp_user 를 쓴다
+    seed_admin_password: str = ""
+    seed_admin_nickname: str = ""    # 비우면 이메일 앞부분을 쓴다
+
     @field_validator("jwt_secret_key")
     @classmethod
     def validate_jwt_secret_key(cls, value: str) -> str:
