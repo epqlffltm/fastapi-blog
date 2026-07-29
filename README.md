@@ -5,8 +5,10 @@
 FastAPI + PostgreSQL 로 만든 블로그. 회원·권한·글·댓글·좋아요·이미지 업로드를 갖춘, 실제로 운영 가능한 수준의 백엔드를 목표로 했습니다.
 
 ```
-Python 3.13 · FastAPI · SQLAlchemy 2.0 (async) · PostgreSQL · Redis · Alembic · uv
+Python 3.13 · FastAPI · SQLAlchemy 2.0 (async) · PostgreSQL · Redis · Alembic · uv · Docker
 ```
+
+Docker 만 있으면 `docker compose up -d` 로 바로 띄울 수 있습니다. 자세한 절차는 [실행](#실행)에 있습니다.
 
 아래는 기능마다 **무엇을 하는지**와 **왜 그렇게 만들었는지**를 같이 적었습니다. 대안이 여럿이던 지점에서 무엇을 골랐고 무엇을 버렸는지가 이 저장소의 본론입니다.
 
@@ -144,6 +146,28 @@ get_current_user  →  get_verified_user  →  get_active_user  →  require_per
 **왜 쪼갰나.** 라우터마다 필요한 깊이가 다릅니다. **글 삭제는 `get_active_user` 가 아니라 `get_current_user` 를 씁니다** — 정지 중이라고 자기 글을 못 내리게 할 이유가 없기 때문입니다. 반대로 글 수정은 새 내용을 만드는 일이라 제재 중엔 막습니다.
 
 401 은 "누구인지 모르겠으니 로그인해라", 403 은 "누구인지는 알지만 자격이 없다"입니다. 둘을 뭉뚱그리면 클라이언트가 로그인 페이지로 보낼지 안내를 띄울지 판단할 수 없습니다.
+
+---
+
+## 시드 — 공개된 비밀번호를 심지 않는다
+
+`python -m app.seed` 는 분류 4개와 **관리자 계정 하나**만 만듭니다.
+
+이전 판본은 `seedpass123` 이라는 고정 비밀번호로 계정 9개를 만들고 그중 셋에 전권을 줬습니다. 로컬 테스트에는 편하지만, 배포한 서버에서 한 번만 돌리면 **비밀번호가 공개된 관리자 계정 셋**이 생깁니다. 시드는 개발용 스크립트가 아니라 배포 절차의 일부가 되기 쉬워서, 그 자체로 백도어가 됩니다.
+
+그래서 계정 정보를 코드에서 빼고 설정에서 읽습니다.
+
+```dotenv
+SEED_ADMIN_EMAIL=        # 비우면 SMTP_USER 를 쓴다
+SEED_ADMIN_PASSWORD=     # 8자 이상, UTF-8 72바이트 이하
+SEED_ADMIN_NICKNAME=     # 비우면 이메일 앞부분
+```
+
+가입 폼과 같은 검증기(`is_bcrypt_password_length_valid`)를 씁니다. 시드만 다른 정책을 갖는 건 나중에 로그인이 안 되는 계정을 만드는 길입니다. 비밀번호는 어떤 경우에도 출력하지 않습니다.
+
+**다시 돌려도 안전합니다.** 없는 분류만 추가하고, 계정이 이미 있으면 건드리지 않습니다. 특히 **기존 계정의 비밀번호를 덮어쓰지 않습니다** — 운영 중에 시드를 한 번 더 돌렸다고 관리자 비밀번호가 설정 파일 값으로 되돌아가면 그게 사고입니다.
+
+`Settings` 가 `extra="forbid"` 라서 이 세 값도 정식 필드로 선언되어 있습니다. `.env` 에 모르는 키가 있으면 앱 전체가 기동을 거부하는데, 그건 오타를 잡아주는 장치라 풀지 않고 필드를 늘리는 쪽을 택했습니다.
 
 ---
 
@@ -328,6 +352,52 @@ _MANAGED_FILENAME = re.compile(r"^[0-9a-f]{32}\.(?:jpg|png|gif|webp)$")
 
 ---
 
+## 컨테이너 — 비루트 실행과 볼륨 소유권
+
+이미지는 두 단계로 나눠 만듭니다. 빌드 단계에서 uv 로 `.venv` 를 만들고, 실행 단계는 순수 파이썬 이미지에 그 결과만 가져옵니다. uv 도 빌드 도구도 최종 이미지에 남지 않아 크기와 공격면이 줍니다.
+
+의존성을 소스보다 **먼저** 설치하는 것도 의도적입니다.
+
+```dockerfile
+RUN --mount=type=bind,source=uv.lock,target=uv.lock \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    uv sync --locked --no-install-project --no-dev
+
+COPY . /app
+```
+
+코드 한 줄 고칠 때마다 패키지를 다시 받으면 재빌드가 못 쓸 만큼 느려집니다. `uv.lock` 이 그대로면 이 레이어는 캐시에서 재사용됩니다.
+
+### 엔트리포인트가 필요한 이유
+
+앱은 uid 1001 로 돕니다. 그런데 `Dockerfile` 에서 업로드 디렉터리를 그 유저 소유로 만들어도, compose 가 그 위에 볼륨을 마운트하면 **이미지에서 설정한 소유권이 덮이고 root 소유가 됩니다.** 결과는 업로드마다 `Permission denied` 입니다.
+
+그래서 root 로 시작해 소유자만 맞추고 권한을 버립니다.
+
+```sh
+if [ "$(id -u)" = "0" ]; then
+    if [ "$(stat -c '%u' "$UPLOAD_DIR")" != "$APP_UID" ]; then
+        chown -R "$APP_UID:$APP_GID" "$UPLOAD_DIR"
+    fi
+    exec setpriv --reuid="$APP_UID" --regid="$APP_GID" --clear-groups "$@"
+fi
+exec "$@"
+```
+
+애플리케이션 프로세스 자체는 root 로 돌지 않습니다. PostgreSQL·Redis 공식 이미지가 쓰는 방식과 같습니다. 소유자가 이미 맞으면 `chown` 을 건너뛰고, 이름 대신 숫자 id 를 써서 이름 해석에 의존하지 않습니다.
+
+### uvicorn 의 `--proxy-headers` 를 쓰지 않는다
+
+보통은 붙이라고 하지만, 이 앱은 `client_ip.py` 에서 신뢰 대역 기준으로 `X-Forwarded-For` 를 직접 해석합니다. uvicorn 이 먼저 `request.client` 를 헤더 값으로 바꿔버리면, 그 코드가 "직접 연결한 상대" 라고 믿는 값이 이미 사용자가 보낸 값이 됩니다. 신뢰 경계가 통째로 무너지므로 둘 중 하나만 씁니다.
+
+### compose
+
+`depends_on` 에 `condition: service_healthy` 를 겁니다. 컨테이너가 **시작된 시점**과 **접속을 받는 시점**은 다릅니다. `pg_isready` 가 통과해야 앱이 뜹니다.
+
+업로드는 볼륨(`uploads`)으로 뺐습니다. 이미지 안에 두면 컨테이너를 갈아끼울 때마다 사라집니다. Redis 는 영속화를 껐습니다 — OTP·레이트리밋 카운터·조회수 중복키는 전부 만료가 있는 임시 데이터입니다.
+
+---
+
 ## 그 밖의 공통 설계
 
 **쓰기 트랜잭션 헬퍼.** 모든 쓰기를 `_write_transaction` 으로 감쌉니다. 실패하면 rollback 하고 원래 예외를 다시 던집니다. 안 하면 세션이 더러운 채로 커넥션 풀에 돌아가 다음 요청이 엉뚱한 곳에서 터집니다.
@@ -344,17 +414,11 @@ _MANAGED_FILENAME = re.compile(r"^[0-9a-f]{32}\.(?:jpg|png|gif|webp)$")
 
 ## 실행
 
-### 요구사항
-
-PostgreSQL 16+, Redis 7+, Python 3.13, [uv](https://docs.astral.sh/uv/)
-
 ### 설정
 
 ```bash
 git clone https://github.com/epqlffltm/fastapi-blog.git
 cd fastapi-blog
-uv sync
-
 cp .env.example .env
 ```
 
@@ -372,20 +436,52 @@ COOKIE_SECURE=false          # 배포(HTTPS)에서 true
 COOKIE_MAX_AGE=86400
 UPLOAD_MAX_BYTES=5242880
 TRUSTED_PROXY_CIDRS=         # 프록시 뒤에 둘 때만. 예) 10.0.0.0/8
+SEED_ADMIN_EMAIL=            # 비우면 SMTP_USER 를 쓴다
+SEED_ADMIN_PASSWORD=         # 시드로 만들 관리자 비밀번호 (8자 이상)
+SEED_ADMIN_NICKNAME=
 ```
 
-### 기동
+`DATABASE_URL` 과 `REDIS_HOST` 는 도커로 띄우면 compose 가 덮어쓰므로 그대로 두셔도 됩니다.
+
+### 기동 — 도커 (권장)
+
+PostgreSQL·Redis 를 따로 설치할 필요가 없습니다. Docker 만 있으면 됩니다.
 
 ```bash
-uv run python scripts/vendor_toastui.py 3.2.2   # 에디터 자산 (최초 1회)
-uv run alembic upgrade head
-uv run python -m app.seed                        # 초기 분류·계정 (선택)
-uv run uvicorn app.main:app --reload
+docker compose build
+docker compose run --rm app alembic upgrade head
+docker compose run --rm app python -m app.seed
+docker compose up -d
 ```
 
 `http://localhost:8000` — 화면 / `http://localhost:8000/docs` — Swagger
 
-관리자 권한: `uv run python -m app.promote your@email.com` (회수는 뒤에 `revoke`)
+마이그레이션을 컨테이너 엔트리포인트가 아니라 **별도 명령으로** 돌립니다. 엔트리포인트에 넣으면 인스턴스를 둘로 늘리는 순간 동시에 실행됩니다.
+
+평소에 쓰는 명령은 이 정도입니다.
+
+```bash
+docker compose up -d              # 시작
+docker compose down               # 정지 (-v 를 붙이면 볼륨까지 지워져 글이 날아간다)
+docker compose logs -f app        # 로그
+docker compose up -d --build app  # 코드를 고친 뒤
+```
+
+소스는 이미지에 구워집니다. 호스트 파일만 고치고 재빌드하지 않으면 컨테이너 안은 예전 코드 그대로입니다.
+
+### 기동 — 로컬 직접 실행
+
+PostgreSQL 16+, Redis 7+, Python 3.13, [uv](https://docs.astral.sh/uv/) 가 필요합니다.
+
+```bash
+uv sync
+uv run python scripts/vendor_toastui.py 3.2.2   # 에디터 자산 (최초 1회)
+uv run alembic upgrade head
+uv run python -m app.seed
+uv run uvicorn app.main:app --reload
+```
+
+관리자 권한을 나중에 조정하려면: `uv run python -m app.promote your@email.com` (회수는 뒤에 `revoke`)
 
 ### 테스트
 
@@ -467,6 +563,9 @@ app/
 alembic/versions/           마이그레이션
 scripts/                    에디터 자산 벤더링
 static/                     화면 (빌드 없음)
+Dockerfile                  멀티스테이지 빌드 (uv → 런타임)
+docker-entrypoint.sh        볼륨 소유권 조정 후 비루트로 강등
+docker-compose.yml          app + postgres + redis
 ```
 
 라우터는 HTTP 만, 레포지토리는 쿼리만, 서비스는 도메인 로직만 압니다.
@@ -478,7 +577,8 @@ static/                     화면 (빌드 없음)
 - **본문 이미지의 고아 파일.** 아바타는 정리하지만, 글에 넣은 이미지는 글을 지우거나 바꿔도 디스크에 남습니다.
 - **관리자 행위 로그가 없습니다.** 누가 누구를 언제 정지·강퇴했는지, 권한을 누가 열어줬는지 흔적이 없습니다. 마지막 관리자가 자기 권한을 회수하면 아무도 회원 관리를 못 하게 되는 잠김도 막혀 있지 않습니다.
 - **글·댓글 작성에 레이트리밋이 없습니다.** 권한 플래그는 "할 수 있나"만 보고 "얼마나 자주"는 보지 않습니다.
-- **단일 서버 전제.** 업로드를 로컬 디스크(`static/img/`)에 저장하므로 인스턴스를 늘리려면 S3 같은 외부 스토리지가 필요합니다. 런타임 데이터라 버전 관리에서는 제외되어 있고, 컨테이너를 갈아끼우면 사라집니다.
+- **단일 서버 전제.** 업로드를 로컬 디스크(`static/img/`)에 저장합니다. 도커에서는 볼륨으로 빼 두어 컨테이너를 갈아끼워도 남지만, 인스턴스를 여럿으로 늘리려면 S3 같은 외부 스토리지가 필요합니다. 런타임 데이터라 버전 관리에서는 제외되어 있습니다.
+- **업로드 오류 메시지가 불친절합니다.** 확장자와 실제 형식이 다르면 `file type does not match content` 만 나옵니다. 웹에서 받은 이미지가 `.jpg` 이름에 WebP 내용인 경우가 흔한데, 사용자는 무엇을 고쳐야 할지 알 수 없습니다. 감지된 형식을 응답에 담아야 합니다.
 - **HS256 대칭키.** 서비스가 하나라 문제없지만, 인증 서버를 분리하면 RS256 + JWKS 로 바꿔야 합니다. 대칭키를 여러 서비스가 공유하면 검증만 해야 할 쪽이 토큰을 위조할 수 있습니다.
 - **리프레시 토큰 없음.** 액세스 토큰 만료가 24시간이라 탈취 시 노출 창이 그만큼 깁니다.
 - **검색이 `ILIKE`.** 글이 늘면 풀스캔이 부담됩니다. `pg_trgm` 인덱스나 전문 검색으로 옮겨야 합니다.
