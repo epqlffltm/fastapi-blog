@@ -1,6 +1,9 @@
 #app/tests/test_permission.py
 
 '''
+2026-07-30
+관리 엔드포인트가 AdminAuditRepository 로 옮겨져 목 대상 변경
+
 2026-07-24
 권한 체크박스 / 정지 · 강퇴 테스트
 '''
@@ -56,10 +59,10 @@ def test_get_users_without_token(client, mock_user_repo):
 
 # ---------- 권한 변경 ----------
 
-def test_grant_permission(admin_client, mock_user_repo):
+def test_grant_permission(admin_client, mock_admin_audit_repo):
     target = _make_user(id=2)
-    mock_user_repo.get_user_by_id.return_value = target
-    mock_user_repo.update_user.return_value = target
+    mock_admin_audit_repo.get_user_by_id_for_update.return_value = target
+    mock_admin_audit_repo.save_user_change.return_value = target
 
     response = admin_client.patch("/user/2/permissions", json={"can_write_post": True})
 
@@ -68,10 +71,10 @@ def test_grant_permission(admin_client, mock_user_repo):
     assert target.can_write_post is True
 
 
-def test_revoke_permission(admin_client, mock_user_repo):
+def test_revoke_permission(admin_client, mock_admin_audit_repo):
     target = _make_user(id=2, can_upload=True)
-    mock_user_repo.get_user_by_id.return_value = target
-    mock_user_repo.update_user.return_value = target
+    mock_admin_audit_repo.get_user_by_id_for_update.return_value = target
+    mock_admin_audit_repo.save_user_change.return_value = target
 
     response = admin_client.patch("/user/2/permissions", json={"can_upload": False})
 
@@ -79,11 +82,11 @@ def test_revoke_permission(admin_client, mock_user_repo):
     assert target.can_upload is False
 
 
-def test_update_only_sent_permissions(admin_client, mock_user_repo):
+def test_update_only_sent_permissions(admin_client, mock_admin_audit_repo):
     """보내지 않은 항목은 건드리지 않는다"""
     target = _make_user(id=2, can_comment=True, can_upload=True)
-    mock_user_repo.get_user_by_id.return_value = target
-    mock_user_repo.update_user.return_value = target
+    mock_admin_audit_repo.get_user_by_id_for_update.return_value = target
+    mock_admin_audit_repo.save_user_change.return_value = target
 
     admin_client.patch("/user/2/permissions", json={"can_write_post": True})
 
@@ -92,7 +95,7 @@ def test_update_only_sent_permissions(admin_client, mock_user_repo):
     assert target.can_write_post is True   # 바뀐 것
 
 
-def test_cannot_change_own_permissions(admin_client, current_user, mock_user_repo):
+def test_cannot_change_own_permissions(admin_client, current_user, mock_admin_audit_repo):
     """자기 권한을 내리면 마지막 관리자가 사라질 수 있다"""
     response = admin_client.patch(
         f"/user/{current_user.id}/permissions", json={"can_manage_user": False}
@@ -100,29 +103,29 @@ def test_cannot_change_own_permissions(admin_client, current_user, mock_user_rep
 
     assert response.status_code == 400
     assert response.json()["detail"] == "cannot change your own permissions"
-    mock_user_repo.update_user.assert_not_called()
+    mock_admin_audit_repo.save_user_change.assert_not_called()
 
 
-def test_change_permission_without_permission(auth_client, mock_user_repo):
+def test_change_permission_without_permission(auth_client, mock_admin_audit_repo):
     response = auth_client.patch("/user/2/permissions", json={"can_write_post": True})
 
     assert response.status_code == 403
-    mock_user_repo.update_user.assert_not_called()
+    mock_admin_audit_repo.save_user_change.assert_not_called()
 
 
-def test_change_permission_user_not_found(admin_client, mock_user_repo):
-    mock_user_repo.get_user_by_id.return_value = None
+def test_change_permission_user_not_found(admin_client, mock_admin_audit_repo):
+    mock_admin_audit_repo.get_user_by_id_for_update.return_value = None
 
     response = admin_client.patch("/user/999/permissions", json={"can_write_post": True})
 
     assert response.status_code == 404
 
 
-def test_change_permission_unknown_field(admin_client, mock_user_repo):
+def test_change_permission_unknown_field(admin_client, mock_admin_audit_repo):
     """정의되지 않은 권한 이름은 무시된다 (스키마에 없는 키)"""
     target = _make_user(id=2)
-    mock_user_repo.get_user_by_id.return_value = target
-    mock_user_repo.update_user.return_value = target
+    mock_admin_audit_repo.get_user_by_id_for_update.return_value = target
+    mock_admin_audit_repo.save_user_change.return_value = target
 
     response = admin_client.patch("/user/2/permissions", json={"can_do_anything": True})
 
@@ -132,10 +135,10 @@ def test_change_permission_unknown_field(admin_client, mock_user_repo):
 
 # ---------- 정지 ----------
 
-def test_suspend_user(admin_client, mock_user_repo):
+def test_suspend_user(admin_client, mock_admin_audit_repo):
     target = _make_user(id=2)
-    mock_user_repo.get_user_by_id.return_value = target
-    mock_user_repo.update_user.return_value = target
+    mock_admin_audit_repo.get_user_by_id_for_update.return_value = target
+    mock_admin_audit_repo.save_user_change.return_value = target
 
     response = admin_client.patch("/user/2/suspend", json={"days": 7})
 
@@ -145,13 +148,13 @@ def test_suspend_user(admin_client, mock_user_repo):
     assert target.is_suspended is True
 
 
-def test_release_suspension(admin_client, mock_user_repo):
+def test_release_suspension(admin_client, mock_admin_audit_repo):
     """days=0 이면 해제"""
     target = _make_user(
         id=2, suspended_until=datetime.now(timezone.utc) + timedelta(days=3)
     )
-    mock_user_repo.get_user_by_id.return_value = target
-    mock_user_repo.update_user.return_value = target
+    mock_admin_audit_repo.get_user_by_id_for_update.return_value = target
+    mock_admin_audit_repo.save_user_change.return_value = target
 
     response = admin_client.patch("/user/2/suspend", json={"days": 0})
 
@@ -160,27 +163,27 @@ def test_release_suspension(admin_client, mock_user_repo):
     assert target.is_suspended is False
 
 
-def test_cannot_suspend_self(admin_client, current_user, mock_user_repo):
+def test_cannot_suspend_self(admin_client, current_user, mock_admin_audit_repo):
     response = admin_client.patch(
         f"/user/{current_user.id}/suspend", json={"days": 7}
     )
 
     assert response.status_code == 400
-    mock_user_repo.update_user.assert_not_called()
+    mock_admin_audit_repo.save_user_change.assert_not_called()
 
 
-def test_suspend_without_permission(auth_client, mock_user_repo):
+def test_suspend_without_permission(auth_client, mock_admin_audit_repo):
     response = auth_client.patch("/user/2/suspend", json={"days": 7})
 
     assert response.status_code == 403
-    mock_user_repo.update_user.assert_not_called()
+    mock_admin_audit_repo.save_user_change.assert_not_called()
 
 
-def test_suspend_invalid_days(admin_client, mock_user_repo):
+def test_suspend_invalid_days(admin_client, mock_admin_audit_repo):
     response = admin_client.patch("/user/2/suspend", json={"days": -1})
 
     assert response.status_code == 422
-    mock_user_repo.update_user.assert_not_called()
+    mock_admin_audit_repo.save_user_change.assert_not_called()
 
 
 def test_expired_suspension_is_not_active():
@@ -209,10 +212,10 @@ def test_suspended_until_in_past_is_not_suspended():
 
 # ---------- 강퇴 ----------
 
-def test_ban_user(admin_client, mock_user_repo):
+def test_ban_user(admin_client, mock_admin_audit_repo):
     target = _make_user(id=2)
-    mock_user_repo.get_user_by_id.return_value = target
-    mock_user_repo.update_user.return_value = target
+    mock_admin_audit_repo.get_user_by_id_for_update.return_value = target
+    mock_admin_audit_repo.save_user_change.return_value = target
 
     response = admin_client.patch("/user/2/ban", json={"banned": True})
 
@@ -221,10 +224,10 @@ def test_ban_user(admin_client, mock_user_repo):
     assert target.is_active is False
 
 
-def test_unban_user(admin_client, mock_user_repo):
+def test_unban_user(admin_client, mock_admin_audit_repo):
     target = _make_user(id=2, is_banned=True)
-    mock_user_repo.get_user_by_id.return_value = target
-    mock_user_repo.update_user.return_value = target
+    mock_admin_audit_repo.get_user_by_id_for_update.return_value = target
+    mock_admin_audit_repo.save_user_change.return_value = target
 
     response = admin_client.patch("/user/2/ban", json={"banned": False})
 
@@ -232,18 +235,18 @@ def test_unban_user(admin_client, mock_user_repo):
     assert target.is_banned is False
 
 
-def test_cannot_ban_self(admin_client, current_user, mock_user_repo):
+def test_cannot_ban_self(admin_client, current_user, mock_admin_audit_repo):
     response = admin_client.patch(f"/user/{current_user.id}/ban", json={"banned": True})
 
     assert response.status_code == 400
-    mock_user_repo.update_user.assert_not_called()
+    mock_admin_audit_repo.save_user_change.assert_not_called()
 
 
-def test_ban_without_permission(auth_client, mock_user_repo):
+def test_ban_without_permission(auth_client, mock_admin_audit_repo):
     response = auth_client.patch("/user/2/ban", json={"banned": True})
 
     assert response.status_code == 403
-    mock_user_repo.update_user.assert_not_called()
+    mock_admin_audit_repo.save_user_change.assert_not_called()
 
 
 # ---------- 제재된 계정의 행동 ----------

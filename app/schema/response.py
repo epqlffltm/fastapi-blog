@@ -18,6 +18,9 @@ get 단일 조회 api
 2026-07-28
 게시글 목록 페이지 정보 추가
 프로필 댓글 목록 스키마 추가
+
+2026-07-30
+관리자 감사 로그 스키마 추가
 '''
 
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -193,6 +196,31 @@ class UserCommentItemSchema(BaseModel):
 
 class ListUserCommentSchema(BaseModel):
     comments: list[UserCommentItemSchema]
+    page: int
+    size: int
+    total: int
+    total_pages: int
+
+
+# 관리자 행위 기록 하나.
+# 행위자와 대상은 id 로만 가리킨다 — 이 스키마에 계정 정보를 담기 시작하면
+# 감사 로그 조회가 회원 정보 유출 경로가 된다
+class AdminAuditLogSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    actor_user_id: int
+    action: str
+    target_type: str
+    target_id: int
+    before_data: dict
+    after_data: dict
+    ip_address: str | None
+    created_at: datetime
+
+
+class ListAdminAuditLogSchema(BaseModel):
+    logs: list[AdminAuditLogSchema]
     page: int
     size: int
     total: int

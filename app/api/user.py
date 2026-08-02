@@ -15,6 +15,9 @@ bcrypt 해싱·검증을 thread pool로 이동
 OTP 원자 검증·소비 / 비밀번호 변경 시 기존 세션 무효화
 아바타 교체 실패·성공 시 고아 파일 정리 / 신뢰 프록시 IP 적용
 삭제 글의 댓글이 공개 프로필에 노출되지 않도록 조회 분리
+
+2026-07-30
+관리 행위(권한·정지·강퇴)를 감사 로그와 한 트랜잭션으로 기록
 '''
 
 import logging
@@ -25,8 +28,9 @@ from fastapi import (
     APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, UploadFile,
 )
 from sqlalchemy.exc import IntegrityError
+from ..database.audit_repository import AdminAuditRepository
 from ..database.connection import settings
-from ..database.orm import User
+from ..database.orm import AdminAuditLog, User
 from ..database.profile_repository import ProfileCommentRepository
 from ..database.repository import UserRepository
 from ..schema.request import (
@@ -324,6 +328,11 @@ async def get_user_comments_handler(
     )
 
 
+def _isoformat_or_none(value: datetime | None) -> str | None:
+    """감사 로그는 JSON 컬럼이라 datetime 을 그대로 담을 수 없다."""
+    return None if value is None else value.isoformat()
+
+
 @router.get("/list", status_code=200, response_model=ListUserSchema)
 async def get_users_handler(
     current_user: User = Depends(require_permission("can_manage_user")),
@@ -337,59 +346,101 @@ async def get_users_handler(
 async def update_permissions_handler(
     id: int,
     request: PermissionUpdateRequest,
+    http_request: Request,
     current_user: User = Depends(require_permission("can_manage_user")),
-    user_repo: UserRepository = Depends(),
+    audit_repo: AdminAuditRepository = Depends(),
 ):
+    # 자기 권한은 못 바꾼다. 이 한 줄이 "마지막 관리자가 스스로를 잠그는" 상황도 막는다 —
+    # 누가 누구의 권한을 회수하든 최소 한 명은 can_manage_user 를 유지한다
     if id == current_user.id:
         raise HTTPException(status_code=400, detail="cannot change your own permissions")
 
-    user = await user_repo.get_user_by_id(id)
+    # 두 관리자가 같은 사람을 동시에 고치면 나중 것이 앞 것을 덮으면서
+    # 로그만 둘 남는다. 행 잠금으로 순서를 강제한다
+    user = await audit_repo.get_user_by_id_for_update(id)
     if user is None:
         raise HTTPException(status_code=404, detail="user not found")
 
-    for name, value in request.model_dump(exclude_none=True).items():
+    # 전체 스냅샷이 아니라 요청에 담긴 키만 기록한다. 무엇이 달라졌는지가 바로 읽힌다
+    changes = request.model_dump(exclude_none=True)
+    before_data = {name: getattr(user, name) for name in changes}
+    for name, value in changes.items():
         setattr(user, name, value)
+    after_data = {name: getattr(user, name) for name in changes}
 
-    return await user_repo.update_user(user)
+    audit_log = AdminAuditLog.create(
+        actor_user_id=current_user.id,
+        action="user.permissions.update",
+        target_id=id,
+        before_data=before_data,
+        after_data=after_data,
+        ip_address=get_client_ip(http_request),
+    )
+    # 변경과 기록을 한 커밋으로 묶는다. 갈라지면 "권한은 바뀌었는데 기록이 없는" 상태가 생긴다
+    return await audit_repo.save_user_change(user, audit_log)
 
 
 @router.patch("/{id}/suspend", status_code=200, response_model=UserSchema)
 async def suspend_handler(
     id: int,
     request: SuspendRequest,
+    http_request: Request,
     current_user: User = Depends(require_permission("can_manage_user")),
-    user_repo: UserRepository = Depends(),
+    audit_repo: AdminAuditRepository = Depends(),
 ):
     if id == current_user.id:
         raise HTTPException(status_code=400, detail="cannot suspend yourself")
 
-    user = await user_repo.get_user_by_id(id)
+    user = await audit_repo.get_user_by_id_for_update(id)
     if user is None:
         raise HTTPException(status_code=404, detail="user not found")
 
+    before_data = {"suspended_until": _isoformat_or_none(user.suspended_until)}
     user.suspended_until = (
         None if request.days == 0
         else datetime.now(timezone.utc) + timedelta(days=request.days)
     )
-    return await user_repo.update_user(user)
+    after_data = {"suspended_until": _isoformat_or_none(user.suspended_until)}
+
+    audit_log = AdminAuditLog.create(
+        actor_user_id=current_user.id,
+        action="user.suspension.update",
+        target_id=id,
+        before_data=before_data,
+        after_data=after_data,
+        ip_address=get_client_ip(http_request),
+    )
+    return await audit_repo.save_user_change(user, audit_log)
 
 
 @router.patch("/{id}/ban", status_code=200, response_model=UserSchema)
 async def ban_handler(
     id: int,
     request: BanRequest,
+    http_request: Request,
     current_user: User = Depends(require_permission("can_manage_user")),
-    user_repo: UserRepository = Depends(),
+    audit_repo: AdminAuditRepository = Depends(),
 ):
     if id == current_user.id:
         raise HTTPException(status_code=400, detail="cannot ban yourself")
 
-    user = await user_repo.get_user_by_id(id)
+    user = await audit_repo.get_user_by_id_for_update(id)
     if user is None:
         raise HTTPException(status_code=404, detail="user not found")
 
+    before_data = {"is_banned": user.is_banned}
     user.is_banned = request.banned
-    return await user_repo.update_user(user)
+    after_data = {"is_banned": user.is_banned}
+
+    audit_log = AdminAuditLog.create(
+        actor_user_id=current_user.id,
+        action="user.ban.update",
+        target_id=id,
+        before_data=before_data,
+        after_data=after_data,
+        ip_address=get_client_ip(http_request),
+    )
+    return await audit_repo.save_user_change(user, audit_log)
 
 
 @router.post("/email/otp", status_code=200)

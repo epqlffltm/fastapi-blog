@@ -23,6 +23,9 @@ user 라우터 추가
 정적 파일 서빙 (static)
 category / upload 라우터 추가
 관리 페이지
+
+2026-07-30
+admin 라우터 추가 (감사 로그 조회)
 '''
 
 from contextlib import asynccontextmanager
@@ -30,7 +33,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from .api import post, comment, user, category, upload
+from .api import admin, post, comment, user, category, upload
 from .database.cache import close_redis_client
 
 
@@ -52,6 +55,9 @@ app.include_router(comment.router)
 app.include_router(user.router)
 app.include_router(category.router)
 app.include_router(upload.router)
+# /admin 페이지 라우트와 경로가 겹치지 않는다.
+# 페이지는 "/admin" 정확히 일치, 이쪽은 "/admin/audit-logs"
+app.include_router(admin.router)
 
 
 @app.get("/health", status_code=200)#헬스 체크

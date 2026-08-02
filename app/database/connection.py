@@ -13,6 +13,9 @@ Settings에 필드 추가
 2026-07-27
 async 전환 (asyncpg) / echo 를 설정으로
 
+2026-07-30
+글·댓글 작성 레이트리밋 설정 추가
+
 2026-07-28
 업로드 이미지 크기 제한 설정 추가
 JWT 비밀키 길이와 알고리즘 검증 추가
@@ -48,6 +51,13 @@ class Settings(BaseSettings):
     upload_max_pixels: int = 25_000_000
     db_echo: bool = False    # 배포에선 False, 로컬 디버깅 때만 True
     trusted_proxy_cidrs: str = ""  # 쉼표 구분. 비어 있으면 전달 IP 헤더를 신뢰하지 않음
+
+    # 글·댓글 작성 빈도 제한 (사용자 ID 기준 고정 구간).
+    # 권한 플래그는 "할 수 있나" 만 보고 "얼마나 자주" 는 보지 않으므로 따로 둔다
+    post_create_limit: int = 10
+    post_create_window_seconds: int = 600
+    comment_create_limit: int = 30
+    comment_create_window_seconds: int = 600
 
     # 시드 스크립트(python -m app.seed)용. 앱 실행에는 쓰이지 않는다.
     # extra="forbid" 라서, .env 에 두려면 여기에 선언되어 있어야 한다

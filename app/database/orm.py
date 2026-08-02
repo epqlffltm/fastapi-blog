@@ -23,12 +23,21 @@ role → 권한 체크박스 / 정지 · 강퇴
 
 2026-07-28
 비밀번호 변경 시 기존 JWT를 무효화하는 token_version 추가
+
+2026-07-30
+관리자 행위 감사 로그(admin_audit_logs) 추가
 '''
 
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import JSON, DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+# 변경 전후 값은 키가 고정되지 않은 dict 다.
+# PostgreSQL 에서는 JSONB, 그 외(테스트용 SQLite)에서는 JSON 으로 저장한다.
+# JSONB 는 파싱된 형태로 보관해 조회와 인덱싱이 가능하다
+_JSON_DICT = JSON().with_variant(JSONB(), "postgresql")
 
 from .connection import Base    # connection의 Base 재사용 (새로 만들지 않음)
 
@@ -268,5 +277,68 @@ class Like(Base):    # 글 좋아요
         return cls(
             user_id=user_id,
             post_id=post_id,
+            created_at=datetime.now(timezone.utc),
+        )
+
+
+class AdminAuditLog(Base):    # 관리자 행위 기록
+    """누가 언제 누구에게 무엇을 했는지 남긴다.
+
+    권한을 여닫고 계정을 정지·강퇴하는 기능은 흔적이 없으면 미완성이다.
+    이 표는 append-only 로 다룬다 — 수정·삭제 API 를 두지 않는다.
+    고칠 수 있는 기록은 기록이 아니다.
+    """
+
+    __tablename__ = "admin_audit_logs"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+
+    # 행위자. 계정이 지워져도 기록은 남아야 하므로 FK 만 걸고 관계는 두지 않는다.
+    # 안 읽는 관계를 두면 조용한 쿼리 폭주의 씨앗이 된다 (User.posts 와 같은 이유)
+    actor_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+
+    # "user.permissions.update" 처럼 점으로 구분한 행위 이름
+    action: Mapped[str] = mapped_column(String(64), index=True)
+
+    # 대상. 지금은 user 뿐이지만 나중에 post·category 로 넓힐 수 있게 종류를 같이 둔다
+    target_type: Mapped[str] = mapped_column(String(32), default="user")
+    target_id: Mapped[int] = mapped_column(index=True)
+
+    # 전체 스냅샷이 아니라 '바뀐 키만' 담는다. 무엇이 달라졌는지가 바로 읽힌다
+    before_data: Mapped[dict] = mapped_column(_JSON_DICT, default=dict)
+    after_data: Mapped[dict] = mapped_column(_JSON_DICT, default=dict)
+
+    # client_ip 로 해석한 실제 클라이언트 주소 (프록시 뒤에서도 정확).
+    # IPv6 최대 45자
+    ip_address: Mapped[str | None] = mapped_column(String(45), default=None)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+    def __repr__(self):
+        return (
+            f"AdminAuditLog(id={self.id}, action={self.action}, "
+            f"actor={self.actor_user_id}, target={self.target_id})"
+        )
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        actor_user_id: int,
+        action: str,
+        target_id: int,
+        before_data: dict,
+        after_data: dict,
+        ip_address: str | None = None,
+        target_type: str = "user",
+    ) -> "AdminAuditLog":
+        return cls(
+            actor_user_id=actor_user_id,
+            action=action,
+            target_type=target_type,
+            target_id=target_id,
+            before_data=before_data,
+            after_data=after_data,
+            ip_address=ip_address,
             created_at=datetime.now(timezone.utc),
         )

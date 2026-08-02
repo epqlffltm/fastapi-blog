@@ -29,6 +29,9 @@ repository 패턴 적용
 게시글 목록 페이지네이션 / 제목·본문·작성자 검색 / N+1 제거
 Redis 장애 시 조회수만 포기하고 글 조회는 계속하도록 변경
 신뢰 프록시 설정을 거친 실제 클라이언트 IP 사용
+
+2026-07-30
+글 작성 빈도 제한 (사용자 ID 기준)
 '''
 
 import logging
@@ -43,6 +46,7 @@ from ..schema.response import (
     UserBriefSchema, CategorySchema, LikeResultSchema,
 )
 from ..service.client_ip import get_client_ip
+from ..service.write_ratelimit import ContentWriteRateLimitService
 from ..service.comment import visible_comments
 from ..service.markdown import extract_first_image
 from .dependency import (
@@ -162,7 +166,19 @@ async def create_post_handler(
     current_user: User = Depends(require_permission("can_write_post")),
     post_repo: PostRepository = Depends(),
     category_repo: CategoryRepository = Depends(),
+    write_rate_limit: ContentWriteRateLimitService = Depends(),
 ):
+    # 권한 플래그는 "쓸 수 있나" 만 보고 "얼마나 자주" 는 보지 않는다.
+    # DB 를 건드리기 전에 막아, 거절할 요청에 조회 비용을 태우지 않는다
+    decision = await write_rate_limit.consume_post(current_user.id)
+    if not decision.allowed:
+        raise HTTPException(
+            status_code=429,
+            detail="too many posts; try again later",
+            # 언제 다시 시도할 수 있는지 알려준다
+            headers={"Retry-After": str(decision.retry_after)},
+        )
+
     if await category_repo.get_category_by_id(request.category_id) is None:
         raise HTTPException(status_code=400, detail="category not found")
 

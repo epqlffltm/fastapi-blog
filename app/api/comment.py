@@ -17,6 +17,9 @@ async 전환 (await) / 저장 후 fresh 재조회로 새 댓글 즉시 반영
 
 2026-07-28
 댓글 생성·수정 입력 검증
+
+2026-07-30
+댓글 작성 빈도 제한 (사용자 ID 기준)
 '''
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -26,6 +29,7 @@ from ..database.orm import Comment, User
 from ..schema.request import CommentCreate, CommentUpdate
 from ..schema.response import PostDetailSchema
 from ..service.comment import visible_comments
+from ..service.write_ratelimit import ContentWriteRateLimitService
 from .dependency import get_current_user, get_active_user, require_permission
 
 router = APIRouter(tags=["comment"])
@@ -37,7 +41,17 @@ async def create_comment_handler(
     current_user: User = Depends(require_permission("can_comment")),
     post_repo: PostRepository = Depends(),
     comment_repo: CommentRepository = Depends(),
+    write_rate_limit: ContentWriteRateLimitService = Depends(),
 ):
+    # 도배 방지. 권한은 "쓸 수 있나" 만 보므로 빈도는 따로 센다
+    decision = await write_rate_limit.consume_comment(current_user.id)
+    if not decision.allowed:
+        raise HTTPException(
+            status_code=429,
+            detail="too many comments; try again later",
+            headers={"Retry-After": str(decision.retry_after)},
+        )
+
     post = await post_repo.get_post_by_id(post_id)
     if post is None:
         raise HTTPException(status_code=404, detail="post not found")

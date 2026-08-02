@@ -14,6 +14,9 @@
 
 2026-07-28
 OTP Lua 스크립트 동작을 반영한 Redis mock 추가
+
+2026-07-30
+감사 로그 저장소 / 글·댓글 레이트리밋 fixture 추가
 '''
 
 from datetime import datetime, timedelta, timezone
@@ -24,6 +27,7 @@ from fastapi.testclient import TestClient
 from redis.asyncio import Redis
 
 from app.api.dependency import get_current_user, get_current_user_optional
+from app.database.audit_repository import AdminAuditRepository
 from app.database.cache import get_redis_client
 from app.database.orm import User
 from app.database.profile_repository import ProfileCommentRepository
@@ -38,6 +42,10 @@ from app.database.repository import (
 from app.main import app
 from app.service.email import EmailService
 from app.service.ratelimit import LoginRateLimitService
+from app.service.write_ratelimit import (
+    ContentWriteRateLimitService,
+    RateLimitDecision,
+)
 from app.service.upload import UploadService
 
 
@@ -148,6 +156,15 @@ def mock_profile_comment_repo():
 
 
 @pytest.fixture
+def mock_admin_audit_repo():
+    """관리자 변경과 감사 로그를 한 트랜잭션에 담는 저장소"""
+    repo = AsyncMock(spec=AdminAuditRepository)
+    app.dependency_overrides[AdminAuditRepository] = lambda: repo
+    yield repo
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
 def mock_user_repo():
     repo = AsyncMock(spec=UserRepository)
     app.dependency_overrides[UserRepository] = lambda: repo
@@ -231,6 +248,18 @@ def mock_rate_limit():
     service = AsyncMock(spec=LoginRateLimitService)
     service.is_blocked.return_value = False
     app.dependency_overrides[LoginRateLimitService] = lambda: service
+    yield service
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def mock_write_rate_limit():
+    """글·댓글 작성 제한 — 기본은 통과. 막히는 경우는 테스트가 직접 켠다"""
+    service = AsyncMock(spec=ContentWriteRateLimitService)
+    allowed = RateLimitDecision(allowed=True, retry_after=0)
+    service.consume_post.return_value = allowed
+    service.consume_comment.return_value = allowed
+    app.dependency_overrides[ContentWriteRateLimitService] = lambda: service
     yield service
     app.dependency_overrides.clear()
 
