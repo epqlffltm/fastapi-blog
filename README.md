@@ -190,6 +190,95 @@ def is_suspended(self) -> bool:
 
 ---
 
+## 감사 로그 — 권한 행사에 흔적을 남긴다
+
+`can_manage_user` 는 남의 계정을 정지·강퇴하고 권한을 여닫는 권한입니다. **"누가 언제 무엇을 했나" 를 답할 수 없는 관리 기능은 미완성입니다.** 권한 변경·정지·강퇴 세 가지를 `admin_audit_logs` 에 남깁니다.
+
+### 변경과 기록을 한 트랜잭션으로
+
+```python
+async with _write_transaction(self.session):
+    self.session.add(audit_log)
+```
+
+둘이 갈라지면 **"권한은 바뀌었는데 기록이 없는"** 상태가 생깁니다. 감사 로그에서 제일 치명적인 실패라, 사용자 변경과 로그 INSERT 를 같은 커밋에 담습니다.
+
+### 행 잠금이 필요한 이유
+
+```python
+select(User).where(User.id == user_id).with_for_update()
+```
+
+두 관리자가 같은 사용자를 동시에 고치면 나중 것이 앞 것을 덮으면서 **로그만 둘 남습니다.** 기록상으로는 두 변경이 다 적용된 것처럼 보이는데 실제 상태는 하나뿐인, 감사 로그가 거짓말을 하는 상황입니다.
+
+여기에는 앞선 결정 하나가 값을 했습니다. PostgreSQL 은 `FOR UPDATE` 를 outer join 의 nullable side 에 걸면 거부하는데, `User.posts` 를 `lazy="raise"` 로 바꿔둔 덕분에 조인이 붙지 않아 이 쿼리가 성립합니다. `selectin` 이었다면 여기서 깨졌을 것입니다.
+
+### 전체 스냅샷이 아니라 바뀐 키만
+
+```json
+{"before_data": {"can_write_post": false}, "after_data": {"can_write_post": true}}
+```
+
+계정 전체를 찍어두면 무엇이 달라졌는지 사람이 눈으로 비교해야 합니다. 요청에 담긴 키만 남기면 로그 한 줄이 곧 변경 내역입니다. `suspended_until` 은 `isoformat()` 으로 바꿔 담습니다 — JSON 컬럼에 datetime 을 그대로 넣을 수 없습니다.
+
+컬럼은 `JSON().with_variant(JSONB(), "postgresql")` 입니다. PostgreSQL 에서 JSONB 는 파싱된 형태로 보관해 `before_data->>'is_banned'` 같은 조회와 인덱싱이 됩니다. 마이그레이션도 같은 variant 를 쓰는데, `--autogenerate` 는 `sa.JSON()` 을 뱉으므로 그대로 두면 운영 DB 컬럼이 모델과 어긋납니다.
+
+### append-only
+
+수정·삭제 API 를 두지 않습니다. **고칠 수 있는 기록은 기록이 아닙니다.** 행위자도 `actor_user_id` FK 만 걸고 관계는 두지 않습니다 — 계정이 지워져도 기록은 남아야 하고, 읽지 않는 관계는 조용한 쿼리 폭주의 씨앗입니다.
+
+### 잠김 방어
+
+세 핸들러 모두 자기 자신은 대상으로 삼을 수 없습니다.
+
+```python
+if id == current_user.id:
+    raise HTTPException(status_code=400, detail="cannot change your own permissions")
+```
+
+이 한 줄이 **마지막 관리자가 스스로를 잠그는 상황**까지 막습니다. 누가 누구의 권한을 회수하든 최소 한 명은 `can_manage_user` 를 유지하므로, 아무도 회원 관리를 못 하게 되는 상태가 만들어지지 않습니다.
+
+---
+
+## 작성 빈도 제한 — 권한과 빈도는 다른 축이다
+
+권한 플래그는 **"쓸 수 있나"** 만 봅니다. **"얼마나 자주"** 는 보지 않으므로 도배를 막지 못합니다. 사용자 ID 기준으로 글 10회/10분, 댓글 30회/10분을 겁니다.
+
+로그인 레이트리밋은 IP 를 함께 셌지만 여기는 사용자 ID 만 씁니다. 글과 댓글은 인증 후에만 만들 수 있어 행위자가 이미 특정되기 때문입니다.
+
+**DB 를 건드리기 전에 막습니다.** 거절할 요청에 분류 조회 비용을 태울 이유가 없고, 잘못된 요청을 반복 전송해 제한을 우회하는 것도 막힙니다.
+
+### 차단해도 창을 연장하지 않는다
+
+```lua
+local count = redis.call("INCR", KEYS[1])
+if count == 1 then
+    redis.call("EXPIRE", KEYS[1], window)
+end
+```
+
+`EXPIRE` 는 **첫 요청에만** 겁니다. 차단된 요청에서도 TTL 을 갱신하면 도배하는 쪽이 자기 창을 무한히 늘려 영구 차단을 자초하고, 정상 사용자도 실수로 몇 번 더 누르면 같은 방식으로 갇힙니다.
+
+`INCR` 과 `EXPIRE` 를 한 스크립트로 묶은 것은 그 사이에 프로세스가 죽으면 만료 없는 키가 영구히 남기 때문입니다.
+
+### 429 에 남은 시간을 담는다
+
+```python
+raise HTTPException(
+    status_code=429,
+    detail="too many posts; try again later",
+    headers={"Retry-After": str(decision.retry_after)},
+)
+```
+
+"나중에 다시" 만으로는 클라이언트가 언제 재시도할지 알 수 없습니다. TTL 을 그대로 내려보내면 정확한 대기 시간이 됩니다.
+
+Redis 장애 시에는 로그인 레이트리밋과 같은 정책으로 fail-open 합니다. 캐시가 죽었다고 글쓰기를 통째로 막는 쪽이 더 큰 사고입니다.
+
+**고정 구간(fixed window) 방식이라 창 경계에서 최대 2배 버스트가 가능합니다.** 슬라이딩 윈도우가 더 정확하지만, 도배 방지에는 이 정도로 충분하다고 판단해 단순한 쪽을 택했습니다.
+
+---
+
 ## 글 — 소프트 삭제, 마크다운, 목록
 
 ### 지우지 않는 삭제
@@ -439,6 +528,10 @@ TRUSTED_PROXY_CIDRS=         # 프록시 뒤에 둘 때만. 예) 10.0.0.0/8
 SEED_ADMIN_EMAIL=            # 비우면 SMTP_USER 를 쓴다
 SEED_ADMIN_PASSWORD=         # 시드로 만들 관리자 비밀번호 (8자 이상)
 SEED_ADMIN_NICKNAME=
+POST_CREATE_LIMIT=10         # 글 작성 한도 (구간당)
+POST_CREATE_WINDOW_SECONDS=600
+COMMENT_CREATE_LIMIT=30
+COMMENT_CREATE_WINDOW_SECONDS=600
 ```
 
 `DATABASE_URL` 과 `REDIS_HOST` 는 도커로 띄우면 compose 가 덮어쓰므로 그대로 두셔도 됩니다.
@@ -537,7 +630,8 @@ uv run pytest -m integration         # 실제 PostgreSQL·Redis 필요
 | GET | `/user/{id}/profile` · `/user/{id}/comments` | 공개 프로필 / 작성 댓글 | — |
 | POST | `/user/password/reset` · `.../verify` | 비밀번호 재설정 | — |
 | GET | `/user/list` | 회원 목록 | `can_manage_user` |
-| PATCH | `/user/{id}/permissions` · `/suspend` · `/ban` | 권한·제재 | `can_manage_user` |
+| PATCH | `/user/{id}/permissions` · `/suspend` · `/ban` | 권한·제재 (감사 로그 기록) | `can_manage_user` |
+| GET | `/admin/audit-logs` | 관리자 행위 기록 (`action`, `target_id` 필터) | `can_manage_user` |
 | POST | `/upload` | 이미지 업로드 | `can_upload` |
 
 전체 스키마는 `/docs` 에 있습니다.
@@ -554,6 +648,7 @@ app/
 │   ├── orm.py                  모델, 관계 로딩 전략
 │   ├── repository.py           DB 접근 계층
 │   ├── profile_repository.py   공개 프로필 전용 조회 (삭제 글 필터 포함)
+│   ├── audit_repository.py     관리 변경 + 감사 로그를 한 트랜잭션으로
 │   ├── connection.py           async 엔진, 설정 검증
 │   └── cache.py                Redis 클라이언트
 ├── schema/                 요청·응답 (Pydantic)
@@ -575,13 +670,12 @@ docker-compose.yml          app + postgres + redis
 ## 알려진 한계
 
 - **본문 이미지의 고아 파일.** 아바타는 정리하지만, 글에 넣은 이미지는 글을 지우거나 바꿔도 디스크에 남습니다.
-- **관리자 행위 로그가 없습니다.** 누가 누구를 언제 정지·강퇴했는지, 권한을 누가 열어줬는지 흔적이 없습니다. 마지막 관리자가 자기 권한을 회수하면 아무도 회원 관리를 못 하게 되는 잠김도 막혀 있지 않습니다.
-- **글·댓글 작성에 레이트리밋이 없습니다.** 권한 플래그는 "할 수 있나"만 보고 "얼마나 자주"는 보지 않습니다.
 - **단일 서버 전제.** 업로드를 로컬 디스크(`static/img/`)에 저장합니다. 도커에서는 볼륨으로 빼 두어 컨테이너를 갈아끼워도 남지만, 인스턴스를 여럿으로 늘리려면 S3 같은 외부 스토리지가 필요합니다. 런타임 데이터라 버전 관리에서는 제외되어 있습니다.
 - **업로드 오류 메시지가 불친절합니다.** 확장자와 실제 형식이 다르면 `file type does not match content` 만 나옵니다. 웹에서 받은 이미지가 `.jpg` 이름에 WebP 내용인 경우가 흔한데, 사용자는 무엇을 고쳐야 할지 알 수 없습니다. 감지된 형식을 응답에 담아야 합니다.
 - **HS256 대칭키.** 서비스가 하나라 문제없지만, 인증 서버를 분리하면 RS256 + JWKS 로 바꿔야 합니다. 대칭키를 여러 서비스가 공유하면 검증만 해야 할 쪽이 토큰을 위조할 수 있습니다.
 - **리프레시 토큰 없음.** 액세스 토큰 만료가 24시간이라 탈취 시 노출 창이 그만큼 깁니다.
 - **검색이 `ILIKE`.** 글이 늘면 풀스캔이 부담됩니다. `pg_trgm` 인덱스나 전문 검색으로 옮겨야 합니다.
+- **감사 로그를 볼 화면이 없습니다.** `/admin/audit-logs` 는 JSON 만 돌려주고, 관리 페이지에 목록 UI 가 아직 없습니다.
 - **회원 탈퇴가 없습니다.**
 
 ---
