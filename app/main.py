@@ -30,10 +30,12 @@ admin 라우터 추가 (감사 로그 조회)
 
 from contextlib import asynccontextmanager
 from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from .api import admin, post, comment, user, category, upload
+
+from .api import admin, category, comment, post, upload, user
 from .database.cache import close_redis_client
 
 

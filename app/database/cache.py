@@ -12,7 +12,6 @@ from redis.asyncio import Redis
 
 from .connection import settings
 
-
 # 애플리케이션 전체에서 연결 풀 하나를 공유한다.
 # redis.asyncio 명령은 호출부에서 await 해야 한다.
 redis_client = Redis(

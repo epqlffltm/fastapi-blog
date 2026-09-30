@@ -32,29 +32,41 @@ Redis 장애 시 조회수만 포기하고 글 조회는 계속하도록 변경
 
 2026-07-30
 글 작성 빈도 제한 (사용자 ID 기준)
+
+2026-09-30
+댓글 표시 규칙을 ORM 관계 대신 응답 스키마에 적용
+무작위 정렬은 한 페이지 표본만 제공 (page 무시, total_pages 최대 1)
 '''
 
 import logging
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Literal
-from ..database.repository import PostRepository, CategoryRepository, LikeRepository
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from redis.asyncio import Redis
+
+from ..database.cache import get_redis_client
 from ..database.orm import Post, User
-from ..schema.request import PostCreate, PostUpdate, PostCategoryUpdate
+from ..database.repository import CategoryRepository, LikeRepository, PostRepository
+from ..schema.request import PostCategoryUpdate, PostCreate, PostUpdate
 from ..schema.response import (
-    ListPostSchema, PostListItemSchema, PostDetailSchema,
-    UserBriefSchema, CategorySchema, LikeResultSchema,
+    CategorySchema,
+    LikeResultSchema,
+    ListPostSchema,
+    PostDetailSchema,
+    PostListItemSchema,
+    UserBriefSchema,
 )
 from ..service.client_ip import get_client_ip
-from ..service.write_ratelimit import ContentWriteRateLimitService
-from ..service.comment import visible_comments
+from ..service.comment import build_post_detail
 from ..service.markdown import extract_first_image
+from ..service.write_ratelimit import ContentWriteRateLimitService
 from .dependency import (
-    get_current_user, get_active_user, require_permission,
+    get_active_user,
+    get_current_user,
     get_current_user_optional,
+    require_permission,
 )
-from ..database.cache import get_redis_client
-from redis.asyncio import Redis
 
 router = APIRouter(tags=["post"])
 logger = logging.getLogger(__name__)
@@ -115,6 +127,11 @@ async def get_pages_handler(
     ]
 
     total_pages = (total + size - 1) // size
+    if order == "random":
+        # 무작위는 매번 새로 섞은 표본 한 페이지뿐이다. 다음 페이지가 있다고 알리면
+        # 클라이언트가 겹치는 페이지를 받아 간다 (저장소도 page 를 무시한다)
+        page = 1
+        total_pages = min(total_pages, 1)
     return ListPostSchema(
         posts=result,
         page=page,
@@ -156,8 +173,7 @@ async def get_page_handler(
                 post.view_count = await post_repo.increment_view_count(post.id)
 
     # relationship 은 삭제 여부를 안 가리므로 표시 규칙을 직접 적용한다
-    post.comments = visible_comments(post.comments)
-    return post
+    return build_post_detail(post)
 
 
 @router.post("/page", status_code=201, response_model=PostDetailSchema)#본문 쓰기
@@ -211,11 +227,10 @@ async def update_post_handler(
         post.contents = request.contents
         # 본문이 바뀌면 썸네일도 다시 계산한다.
         post.thumbnail_url = extract_first_image(request.contents)
-    post.updated_at = datetime.now(timezone.utc)
+    post.updated_at = datetime.now(UTC)
     post = await post_repo.update(post)
 
-    post.comments = visible_comments(post.comments)
-    return post
+    return build_post_detail(post)
 
 
 @router.delete("/page/{id}", status_code=204)#본문 삭제
@@ -233,7 +248,7 @@ async def delete_post_handler(
         raise HTTPException(status_code=403, detail="not your post")
 
     post.is_deleted = True
-    post.updated_at = datetime.now(timezone.utc)
+    post.updated_at = datetime.now(UTC)
     await post_repo.update(post)
     return
 
@@ -249,11 +264,10 @@ async def restore_post_handler(
         raise HTTPException(status_code=404, detail="post not found")
 
     post.is_deleted = False
-    post.updated_at = datetime.now(timezone.utc)
+    post.updated_at = datetime.now(UTC)
     post = await post_repo.update(post)
 
-    post.comments = visible_comments(post.comments)
-    return post
+    return build_post_detail(post)
 
 
 @router.patch("/page/{id}/category", status_code=200, response_model=PostDetailSchema)#분류 이동
@@ -273,11 +287,10 @@ async def move_post_category_handler(
         raise HTTPException(status_code=400, detail="category not found")
 
     post.category_id = request.category_id
-    post.updated_at = datetime.now(timezone.utc)
+    post.updated_at = datetime.now(UTC)
     post = await post_repo.update(post)
 
-    post.comments = visible_comments(post.comments)
-    return post
+    return build_post_detail(post)
 
 
 @router.get("/page/{id}/like", status_code=200, response_model=LikeResultSchema)#좋아요 상태

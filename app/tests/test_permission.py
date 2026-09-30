@@ -6,10 +6,14 @@
 
 2026-07-24
 권한 체크박스 / 정지 · 강퇴 테스트
+
+2026-09-30
+정지·강퇴 회원 프로필 수정 차단 테스트
 '''
 
-from datetime import datetime, timedelta, timezone
-from app.database.orm import User, PERMISSION_NAMES
+from datetime import UTC, datetime, timedelta
+
+from app.database.orm import PERMISSION_NAMES, User
 
 
 def _make_user(id=2, nickname="other", **kwargs):
@@ -19,7 +23,7 @@ def _make_user(id=2, nickname="other", **kwargs):
         can_comment=True, can_write_post=False, can_upload=False,
         can_manage_category=False, can_manage_user=False,
         suspended_until=None, is_banned=False,
-        created_at=datetime(2026, 7, 23, tzinfo=timezone.utc),
+        created_at=datetime(2026, 7, 23, tzinfo=UTC),
         can_manage_post=False,
     )
     defaults.update(kwargs)
@@ -151,7 +155,7 @@ def test_suspend_user(admin_client, mock_admin_audit_repo):
 def test_release_suspension(admin_client, mock_admin_audit_repo):
     """days=0 이면 해제"""
     target = _make_user(
-        id=2, suspended_until=datetime.now(timezone.utc) + timedelta(days=3)
+        id=2, suspended_until=datetime.now(UTC) + timedelta(days=3)
     )
     mock_admin_audit_repo.get_user_by_id_for_update.return_value = target
     mock_admin_audit_repo.save_user_change.return_value = target
@@ -188,7 +192,7 @@ def test_suspend_invalid_days(admin_client, mock_admin_audit_repo):
 
 def test_expired_suspension_is_not_active():
     """기한이 지난 정지는 저절로 풀린다"""
-    user = _make_user(suspended_until=datetime.now(timezone.utc) - timedelta(days=1))
+    user = _make_user(suspended_until=datetime.now(UTC) - timedelta(days=1))
 
     assert user.is_suspended is False
     assert user.is_active is True
@@ -196,7 +200,7 @@ def test_expired_suspension_is_not_active():
 
 def test_suspended_until_in_future_is_suspended():
     """정지 해제 시각이 미래면 is_suspended True (컬럼이 timestamptz 라 aware 로 비교)"""
-    future = datetime.now(timezone.utc) + timedelta(days=1)
+    future = datetime.now(UTC) + timedelta(days=1)
     user = _make_user(suspended_until=future)
 
     assert user.is_suspended is True
@@ -204,7 +208,7 @@ def test_suspended_until_in_future_is_suspended():
 
 def test_suspended_until_in_past_is_not_suspended():
     """정지 해제 시각이 지났으면 is_suspended False"""
-    past = datetime.now(timezone.utc) - timedelta(days=1)
+    past = datetime.now(UTC) - timedelta(days=1)
     user = _make_user(suspended_until=past)
 
     assert user.is_suspended is False
@@ -298,6 +302,23 @@ def test_banned_can_see_own_status(banned_client, mock_user_repo):
 
     assert response.status_code == 200
     assert response.json()["is_banned"] is True
+
+
+def test_suspended_cannot_update_profile(suspended_client, mock_user_repo):
+    """보는 건 되지만 남에게 보이는 프로필을 고치는 건 막는다"""
+    response = suspended_client.patch("/user/me", json={"bio": "광고"})
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "suspended"
+    mock_user_repo.update_user.assert_not_called()
+
+
+def test_banned_cannot_update_profile(banned_client, mock_user_repo):
+    response = banned_client.patch("/user/me", json={"nickname": "newname"})
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "banned"
+    mock_user_repo.update_user.assert_not_called()
 
 
 # ---------- 가입 기본값 ----------

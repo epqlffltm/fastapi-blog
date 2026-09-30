@@ -19,6 +19,9 @@ flush/commit 이 await 되지 않은 채 버려지고 있었다.
 사용법:
     uv run python -m app.seed
     docker compose run --rm app python -m app.seed
+
+2026-09-30
+관리자 이메일을 소문자로 정규화해 저장
 '''
 
 import asyncio
@@ -57,7 +60,8 @@ def read_admin_credentials() -> tuple[str, str, str]:
     앱과 같은 Settings 를 쓴다. 로컬에서는 .env 를, 컨테이너에서는
     compose 가 주입한 환경변수를 읽으므로 양쪽이 같은 경로로 동작한다.
     """
-    email = (settings.seed_admin_email or settings.smtp_user or "").strip()
+    # 앱의 요청 스키마와 같은 표준형(소문자)으로 저장해야 로그인에서 찾힌다
+    email = (settings.seed_admin_email or settings.smtp_user or "").strip().lower()
     password = settings.seed_admin_password
     nickname = settings.seed_admin_nickname.strip()
 

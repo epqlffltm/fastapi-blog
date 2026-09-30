@@ -14,17 +14,17 @@ dependencies = [
     "pydantic-settings>=2.14.2",
     "pydantic[email]>=2.13.4",
     "pyjwt>=2.13.0",
-    "pytest>=9.1.1",
-    "pytest-asyncio>=1.4.0",
     "python-multipart>=0.0.32",
     "redis>=8.0.1",
     "sqlalchemy>=2.0.51",
 ]
 
 [dependency-groups]
+# 테스트 전용. 운영 이미지(Dockerfile 의 --no-dev)에는 들어가지 않는다
 dev = [
     "httpx>=0.28.1",
     "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
 ]
 
 [tool.pytest.ini_options]
@@ -38,9 +38,26 @@ testpaths = ["app/tests"]
 target-version = "py313"
 line-length = 100
 exclude = ["static"]
+# app/api 에는 __init__.py 가 없다 (암시적 네임스페이스 패키지). 상대 import 해석용
+namespace-packages = ["app/api"]
 
 [tool.ruff.lint]
-select = ["E9", "F63", "F7", "F82"]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI 의존성 선언은 기본값 자리에 호출을 쓰는 게 정식 문법이다 (B008 예외)
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Cookie",
+    "fastapi.File",
+    "fastapi.Form",
+    "fastapi.Header",
+    "fastapi.Path",
+    "fastapi.Body",
+    # 권한 이름 오타를 기동 시점에 잡으려고 일부러 정의 시점에 호출한다
+    "app.api.dependency.require_permission",
+]
 
 [tool.ruff.format]
 quote-style = "double"

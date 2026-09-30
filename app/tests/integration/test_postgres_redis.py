@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from redis.asyncio import Redis
@@ -13,7 +13,10 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.database.orm import Category, Comment, Post, User
 from app.database.profile_repository import ProfileCommentRepository
+from app.database.repository import UserRepository
+from app.schema.request import LogInRequest, SignUpRequest
 from app.service.otp import OTPService, OTPVerifyResult
+from app.service.ratelimit import LoginRateLimitService
 
 pytestmark = pytest.mark.integration
 
@@ -58,7 +61,7 @@ async def test_postgres_migration_and_deleted_post_comment_visibility():
                 )
             )
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         async with session_factory() as session:
             user = User.create(
                 email="integration@example.com",
@@ -187,3 +190,69 @@ async def test_redis_otp_attempt_limit_and_reissue_reset():
     finally:
         await redis.flushdb()
         await redis.aclose()
+
+
+@pytest.mark.asyncio
+async def test_redis_login_attempts_are_capped_under_concurrency():
+    redis = Redis.from_url(_redis_url(), decode_responses=True)
+    service = LoginRateLimitService(redis=redis)
+    email = "Brute@Example.com"
+    ip = "203.0.113.7"
+
+    try:
+        await redis.flushdb()
+
+        results = await asyncio.gather(
+            *(service.acquire_attempt(email, ip) for _ in range(30))
+        )
+
+        assert results.count(True) == service.max_per_email
+        email_key = service._email_key(email)
+        ip_key = service._ip_key(ip)
+        # 막힌 요청은 카운터를 올리지 않는다
+        assert int(await redis.get(email_key)) == service.max_per_email
+        assert int(await redis.get(ip_key)) == service.max_per_email
+        assert 0 < await redis.ttl(email_key) <= service.window
+
+        await service.reset(email, ip)
+        assert await redis.get(email_key) is None
+        assert int(await redis.get(ip_key)) == service.max_per_email - 1
+    finally:
+        await redis.flushdb()
+        await redis.aclose()
+
+
+@pytest.mark.asyncio
+async def test_postgres_email_lookup_is_case_insensitive_via_normalization():
+    engine = create_async_engine(_database_url())
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    try:
+        async with engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "TRUNCATE TABLE likes, comments, uploads, posts, categories, users "
+                    "RESTART IDENTITY CASCADE"
+                )
+            )
+
+        signup = SignUpRequest(email="foo@x.com", password="password123", nickname="foo")
+        async with session_factory() as session:
+            await UserRepository(session=session).save_user(
+                User.create(
+                    email=signup.email,
+                    hashed_password="$2b$12$integration",
+                    nickname=signup.nickname,
+                )
+            )
+
+        login = LogInRequest(email="Foo@X.com", password="password123")
+        async with session_factory() as session:
+            repository = UserRepository(session=session)
+            found = await repository.get_user_by_email(login.email)
+            assert found is not None and found.email == "foo@x.com"
+
+            duplicate = SignUpRequest(email="FOO@x.com", password="password123", nickname="f2")
+            assert await repository.get_user_by_email(duplicate.email) is not None
+    finally:
+        await engine.dispose()

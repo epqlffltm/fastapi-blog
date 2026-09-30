@@ -23,6 +23,9 @@ nickname 제거 (작성자는 토큰에서)
 2026-07-28
 게시글 수정 / 댓글 생성·수정 입력 검증
 bcrypt 비밀번호 UTF-8 바이트 길이 검증
+
+2026-09-30
+이메일을 소문자·공백 제거로 정규화 (가입·로그인·재설정이 같은 계정을 가리키게)
 '''
 
 from typing import Annotated
@@ -30,7 +33,6 @@ from typing import Annotated
 from pydantic import AfterValidator, BaseModel, EmailStr, Field, field_validator
 
 from ..service.password import validate_bcrypt_password_length
-
 
 POST_TITLE_MAX_LENGTH = 200
 POST_CONTENTS_MAX_LENGTH = 100_000
@@ -42,6 +44,19 @@ NewPassword = Annotated[
     Field(min_length=8),
     AfterValidator(validate_bcrypt_password_length),
 ]
+
+
+def normalize_email(value: str) -> str:
+    """이메일을 저장·조회용 표준형(앞뒤 공백 제거 + 소문자)으로 만든다.
+
+    Foo@x.com 과 foo@x.com 이 서로 다른 계정이 되면 중복 가입이 생기고,
+    OTP·레이트리밋 키(이미 소문자)와 DB 조회가 서로 다른 계정을 보게 된다.
+    """
+    return value.strip().lower()
+
+
+# 요청 스키마에서 한 번 정규화하면 핸들러·서비스는 표준형만 다룬다
+NormalizedEmail = Annotated[EmailStr, AfterValidator(normalize_email)]
 
 
 def _normalize_title(value: str | None) -> str | None:
@@ -130,7 +145,7 @@ class CommentUpdate(BaseModel):
 
 
 class SignUpRequest(BaseModel):
-    email: EmailStr
+    email: NormalizedEmail
     password: NewPassword
     nickname: str = Field(min_length=2, max_length=20)
 
@@ -138,7 +153,7 @@ class SignUpRequest(BaseModel):
 class LogInRequest(BaseModel):
     # 로그인엔 길이 제한을 걸지 않는다. 정책이 바뀌면 기존 회원이 갇힌다
     # bcrypt 한도를 넘는 입력은 AuthService에서 일반 인증 실패로 처리한다.
-    email: EmailStr
+    email: NormalizedEmail
     password: str
 
 
@@ -147,11 +162,11 @@ class VerifyOTPRequest(BaseModel):
 
 
 class ResetPasswordRequest(BaseModel):
-    email: EmailStr
+    email: NormalizedEmail
 
 
 class ResetPasswordVerifyRequest(BaseModel):
-    email: EmailStr
+    email: NormalizedEmail
     otp: int = Field(ge=100_000, le=999_999)
     new_password: NewPassword
 

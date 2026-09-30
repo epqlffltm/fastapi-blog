@@ -7,17 +7,23 @@
 2026-07-24
 httpOnly 쿠키 로그인 / 로그아웃
 권한 반영
+
+2026-09-30
+로그인 시도 원자 제한 (순차·동시 요청) 테스트
+이메일 대소문자 정규화 (가입 중복·로그인) 테스트
 '''
+
+from datetime import UTC, datetime, timedelta
 
 import jwt
 import pytest
-from datetime import datetime, timedelta, timezone
 from sqlalchemy.exc import IntegrityError
+
 from app.database.connection import settings
 from app.database.orm import User
 from app.service.auth import AuthService
-from app.service.ratelimit import LoginRateLimitService
 from app.service.otp import OTPService
+from app.service.ratelimit import LoginRateLimitService
 
 
 def _make_user(id=1, email="test@example.com", nickname="tester"):
@@ -34,7 +40,7 @@ def _make_user(id=1, email="test@example.com", nickname="tester"):
         can_manage_user=False,
         suspended_until=None,
         is_banned=False,
-        created_at=datetime(2026, 7, 23, tzinfo=timezone.utc),
+        created_at=datetime(2026, 7, 23, tzinfo=UTC),
         can_manage_post=False,
     )
 
@@ -73,6 +79,56 @@ def test_sign_up_duplicate_email(client, mock_user_repo):
     assert response.status_code == 409
     assert response.json()["detail"] == "email already exists"
     mock_user_repo.save_user.assert_not_called()
+
+
+def test_sign_up_normalizes_email_case(client, mock_user_repo):
+    """대소문자만 다른 이메일은 같은 계정이다. 저장·중복 검사 모두 소문자로."""
+    mock_user_repo.get_user_by_email.return_value = None
+    mock_user_repo.get_user_by_nickname.return_value = None
+    mock_user_repo.save_user.return_value = _make_user(email="foo@x.com", nickname="foofoo")
+
+    response = client.post(
+        "/user/sign-up",
+        json={"email": "  Foo@X.com ", "password": "password123", "nickname": "foofoo"},
+    )
+
+    assert response.status_code == 201
+    mock_user_repo.get_user_by_email.assert_awaited_once_with("foo@x.com")
+    saved = mock_user_repo.save_user.await_args.args[0]
+    assert saved.email == "foo@x.com"
+
+
+def test_sign_up_duplicate_email_different_case_rejected(client, mock_user_repo):
+    mock_user_repo.get_user_by_email.side_effect = (
+        lambda email: _make_user(email="foo@x.com") if email == "foo@x.com" else None
+    )
+
+    response = client.post(
+        "/user/sign-up",
+        json={"email": "FOO@x.com", "password": "password123", "nickname": "another"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "email already exists"
+    mock_user_repo.save_user.assert_not_called()
+
+
+def test_log_in_with_different_email_case(client, mock_user_repo, mock_rate_limit):
+    """foo@x.com 으로 가입한 계정에 Foo@x.com 으로 로그인할 수 있다."""
+    user = _make_user(email="foo@x.com")
+    user.password = AuthService().hash_password("password123")
+    mock_user_repo.get_user_by_email.side_effect = (
+        lambda email: user if email == "foo@x.com" else None
+    )
+
+    response = client.post(
+        "/user/log-in",
+        json={"email": "Foo@x.com", "password": "password123"},
+    )
+
+    assert response.status_code == 200
+    # 레이트리밋도 같은 표준형 이메일로 센다
+    mock_rate_limit.acquire_attempt.assert_awaited_once_with("foo@x.com", "testclient")
 
 
 def test_sign_up_duplicate_nickname(client, mock_user_repo):
@@ -233,7 +289,7 @@ def test_log_in_no_such_email(client, mock_user_repo):
 
 def test_log_in_blocked_when_rate_limited(client, mock_user_repo, mock_rate_limit):
     """한도를 넘으면 429. 비밀번호 검증까지 가지 않아야 한다."""
-    mock_rate_limit.is_blocked.return_value = True
+    mock_rate_limit.acquire_attempt.return_value = False
 
     response = client.post(
         "/user/log-in",
@@ -247,7 +303,7 @@ def test_log_in_blocked_when_rate_limited(client, mock_user_repo, mock_rate_limi
     mock_user_repo.get_user_by_email.assert_not_called()
 
 
-def test_log_in_wrong_password_records_failure(client, mock_user_repo, mock_rate_limit):
+def test_log_in_wrong_password_counts_attempt(client, mock_user_repo, mock_rate_limit):
     user = _make_user()
     user.password = AuthService().hash_password("password123")
     mock_user_repo.get_user_by_email.return_value = user
@@ -258,14 +314,15 @@ def test_log_in_wrong_password_records_failure(client, mock_user_repo, mock_rate
     )
 
     assert response.status_code == 401
-    mock_rate_limit.record_failure.assert_awaited_once()
+    # 시도는 검증 전에 이미 세었다. 실패했으니 되돌리지 않는다
+    mock_rate_limit.acquire_attempt.assert_awaited_once()
     mock_rate_limit.reset.assert_not_awaited()
 
 
-def test_log_in_unknown_email_also_records_failure(
+def test_log_in_unknown_email_also_counts_attempt(
     client, mock_user_repo, mock_rate_limit
 ):
-    """없는 계정도 똑같이 기록한다. 안 그러면 응답 차이로 가입 여부가 샌다."""
+    """없는 계정도 똑같이 센다. 안 그러면 응답 차이로 가입 여부가 샌다."""
     mock_user_repo.get_user_by_email.return_value = None
 
     response = client.post(
@@ -274,7 +331,8 @@ def test_log_in_unknown_email_also_records_failure(
     )
 
     assert response.status_code == 401
-    mock_rate_limit.record_failure.assert_awaited_once()
+    mock_rate_limit.acquire_attempt.assert_awaited_once()
+    mock_rate_limit.reset.assert_not_awaited()
 
 
 def test_log_in_success_resets_counter(client, mock_user_repo, mock_rate_limit):
@@ -288,24 +346,111 @@ def test_log_in_success_resets_counter(client, mock_user_repo, mock_rate_limit):
     )
 
     assert response.status_code == 200
-    mock_rate_limit.reset.assert_awaited_once()
-    mock_rate_limit.record_failure.assert_not_awaited()
+    mock_rate_limit.reset.assert_awaited_once_with("test@example.com", "testclient")
+
+
+def _wrong_password_user() -> User:
+    user = _make_user()
+    user.password = AuthService().hash_password("password123")
+    return user
+
+
+def test_log_in_sequential_limit_unchanged(client, mock_user_repo, mock_redis):
+    """순차 요청: 5번까지는 401, 6번째부터 429 (기존 동작 그대로)."""
+    mock_user_repo.get_user_by_email.return_value = _wrong_password_user()
+
+    codes = [
+        client.post(
+            "/user/log-in",
+            json={"email": "test@example.com", "password": "wrongpassword"},
+        ).status_code
+        for _ in range(LoginRateLimitService.max_per_email + 2)
+    ]
+
+    assert codes == [401] * LoginRateLimitService.max_per_email + [429, 429]
+
+
+def test_log_in_success_clears_email_counter_keeps_ip_failures(
+    client, mock_user_repo, mock_redis
+):
+    user = _wrong_password_user()
+    mock_user_repo.get_user_by_email.return_value = user
+
+    for _ in range(3):
+        client.post(
+            "/user/log-in",
+            json={"email": "test@example.com", "password": "wrongpassword"},
+        )
+    response = client.post(
+        "/user/log-in",
+        json={"email": "test@example.com", "password": "password123"},
+    )
+
+    assert response.status_code == 200
+    assert "login-fail:email:test@example.com" not in mock_redis.counters
+    # 성공한 시도 몫(1)만 빠지고 실패 3번은 남는다
+    assert mock_redis.counters["login-fail:ip:testclient"] == 3
+
+
+@pytest.mark.asyncio
+async def test_log_in_concurrent_requests_cannot_exceed_limit(
+    mock_user_repo, mock_redis, monkeypatch
+):
+    """동시에 몰린 틀린 로그인 중 한도만큼만 비밀번호 검증까지 간다.
+
+    예전 코드는 검증(느림)이 끝난 뒤에야 실패를 기록해서, 동시에 들어온
+    요청이 모두 같은 카운트를 보고 통과했다.
+    """
+    import asyncio
+
+    import httpx
+
+    from app.main import app
+
+    mock_user_repo.get_user_by_email.return_value = _wrong_password_user()
+    checked = 0
+
+    async def slow_wrong_verify(self, password, hashed):
+        nonlocal checked
+        checked += 1
+        await asyncio.sleep(0.05)   # bcrypt 처럼 느린 구간에서 다른 요청이 끼어든다
+        return False
+
+    monkeypatch.setattr(AuthService, "verify_password_async", slow_wrong_verify)
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
+        responses = await asyncio.gather(
+            *(
+                ac.post(
+                    "/user/log-in",
+                    json={"email": "test@example.com", "password": "wrongpassword"},
+                )
+                for _ in range(20)
+            )
+        )
+
+    codes = [r.status_code for r in responses]
+    limit = LoginRateLimitService.max_per_email
+    assert checked == limit
+    assert codes.count(401) == limit
+    assert codes.count(429) == 20 - limit
 
 
 @pytest.mark.asyncio
 async def test_rate_limit_allows_under_threshold(mock_redis):
     service = LoginRateLimitService(redis=mock_redis)
-    mock_redis.eval.return_value = 0
+    mock_redis.eval.return_value = 1
 
-    assert await service.is_blocked("test@example.com", "1.2.3.4") is False
+    assert await service.acquire_attempt("test@example.com", "1.2.3.4") is True
 
 
 @pytest.mark.asyncio
 async def test_rate_limit_blocks_over_threshold(mock_redis):
     service = LoginRateLimitService(redis=mock_redis)
-    mock_redis.eval.return_value = 1
+    mock_redis.eval.return_value = 0
 
-    assert await service.is_blocked("test@example.com", "1.2.3.4") is True
+    assert await service.acquire_attempt("test@example.com", "1.2.3.4") is False
 
 
 @pytest.mark.asyncio
@@ -314,16 +459,20 @@ async def test_rate_limit_fails_open_when_redis_down(mock_redis):
     mock_redis.eval.side_effect = ConnectionError("redis down")
 
     service = LoginRateLimitService(redis=mock_redis)
-    assert await service.is_blocked("test@example.com", "1.2.3.4") is False
+    assert await service.acquire_attempt("test@example.com", "1.2.3.4") is True
 
 
 @pytest.mark.asyncio
 async def test_rate_limit_reset_clears_email_counter_only(mock_redis):
-    """IP 카운터는 남긴다 — 자기 계정 로그인으로 IP 한도를 초기화하지 못하게."""
+    """IP 카운터는 이번 성공 몫만 뺀다 — 자기 계정 로그인으로 IP 한도를 초기화하지 못하게."""
     service = LoginRateLimitService(redis=mock_redis)
-    await service.reset("Test@Example.com")
+    mock_redis.counters["login-fail:email:test@example.com"] = 4
+    mock_redis.counters["login-fail:ip:1.2.3.4"] = 10
 
-    mock_redis.delete.assert_awaited_once_with("login-fail:email:test@example.com")
+    await service.reset("Test@Example.com", "1.2.3.4")
+
+    assert "login-fail:email:test@example.com" not in mock_redis.counters
+    assert mock_redis.counters["login-fail:ip:1.2.3.4"] == 9
 
 
 def test_banned_can_still_log_in(client, mock_user_repo):
@@ -397,7 +546,7 @@ def test_jwt_roundtrip():
 def test_decode_expired_token():
     service = AuthService()
     expired = jwt.encode(
-        {"sub": "1", "exp": datetime.now(timezone.utc) - timedelta(seconds=1)},
+        {"sub": "1", "exp": datetime.now(UTC) - timedelta(seconds=1)},
         settings.jwt_secret_key,
         algorithm=settings.jwt_algorithm,
     )
@@ -409,7 +558,7 @@ def test_decode_expired_token():
 def test_decode_tampered_token():
     service = AuthService()
     forged = jwt.encode(
-        {"sub": "1", "exp": datetime.now(timezone.utc) + timedelta(days=1)},
+        {"sub": "1", "exp": datetime.now(UTC) + timedelta(days=1)},
         "wrong-secret-key-that-is-long-enough-to-avoid-a-warning",   # 다른 키로 서명
         algorithm=settings.jwt_algorithm,
     )

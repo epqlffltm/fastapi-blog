@@ -20,15 +20,18 @@ async 전환 (asyncpg) / echo 를 설정으로
 업로드 이미지 크기 제한 설정 추가
 JWT 비밀키 길이와 알고리즘 검증 추가
 신뢰 프록시 CIDR 설정 검증 추가
+
+2026-09-30
+남아 있던 '# 추가' 주석 정리
 '''
 
 from ipaddress import ip_network
 from typing import Literal
 
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
-from sqlalchemy.orm import DeclarativeBase
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.orm import DeclarativeBase
 
 
 class Settings(BaseSettings):
@@ -39,11 +42,11 @@ class Settings(BaseSettings):
     jwt_algorithm: Literal["HS256"] = "HS256"
     redis_host: str = "127.0.0.1"
     redis_port: int = 6379
-    smtp_host: str = "smtp.gmail.com"      # 추가
-    smtp_port: int = 587                    # 추가
-    smtp_user: str = ""                     # 추가
-    smtp_password: str = ""                 # 추가
-    cookie_secure: bool = False    # 추가: 배포(HTTPS)에서 true
+    smtp_host: str = "smtp.gmail.com"
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    cookie_secure: bool = False    # 배포(HTTPS)에서 true
     cookie_max_age: int = 86400
     upload_max_bytes: int = 5 * 1024 * 1024
     upload_max_width: int = 10_000

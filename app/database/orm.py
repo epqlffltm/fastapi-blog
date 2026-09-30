@@ -28,18 +28,18 @@ role → 권한 체크박스 / 정지 · 강퇴
 관리자 행위 감사 로그(admin_audit_logs) 추가
 '''
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import JSON, DateTime, ForeignKey, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from .connection import Base  # connection의 Base 재사용 (새로 만들지 않음)
+
 # 변경 전후 값은 키가 고정되지 않은 dict 다.
 # PostgreSQL 에서는 JSONB, 그 외(테스트용 SQLite)에서는 JSON 으로 저장한다.
 # JSONB 는 파싱된 형태로 보관해 조회와 인덱싱이 가능하다
 _JSON_DICT = JSON().with_variant(JSONB(), "postgresql")
-
-from .connection import Base    # connection의 Base 재사용 (새로 만들지 않음)
 
 
 # 관리 화면의 체크박스와 1:1. 순서가 곧 화면 순서다.
@@ -81,7 +81,7 @@ class Post(Base):
 
     @classmethod
     def create(cls, request, user_id: int) -> "Post":
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         return cls(
             title=request.title,
             contents=request.contents,
@@ -116,7 +116,7 @@ class Comment(Base):
 
     @classmethod
     def create(cls, request, post_id: int, user_id: int) -> "Comment":
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         return cls(
             post_id=post_id,
             user_id=user_id,
@@ -152,7 +152,7 @@ class Upload(Base):    # 업로드된 파일 기록 (본문 위치는 마크다�
             original_name=original_name,
             content_type=content_type,
             size=size,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
 
 
@@ -197,7 +197,7 @@ class User(Base):    # 회원 테이블
         if self.suspended_until is None:
             return False
         # 컬럼이 timestamptz(시간대 포함)라 DB 에서 읽어도 aware. 그대로 비교하면 된다
-        return self.suspended_until > datetime.now(timezone.utc)
+        return self.suspended_until > datetime.now(UTC)
 
     @property
     def is_active(self) -> bool:
@@ -228,7 +228,7 @@ class User(Base):    # 회원 테이블
             can_manage_user=False,
             suspended_until=None,
             is_banned=False,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
 
 
@@ -277,7 +277,7 @@ class Like(Base):    # 글 좋아요
         return cls(
             user_id=user_id,
             post_id=post_id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
 
 
@@ -340,5 +340,5 @@ class AdminAuditLog(Base):    # 관리자 행위 기록
             before_data=before_data,
             after_data=after_data,
             ip_address=ip_address,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )

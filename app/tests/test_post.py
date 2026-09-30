@@ -13,14 +13,17 @@
 
 2026-07-28
 게시글 수정 입력 검증
+
+2026-09-30
+무작위 정렬 단일 페이지 응답 테스트
 '''
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from pydantic import ValidationError
 
-from app.database.orm import Post, User, Category
+from app.database.orm import Category, Post, User
 from app.schema.request import PostCreate, PostUpdate
 
 
@@ -31,7 +34,7 @@ def _make_user(id=1, nickname="tester"):
         can_comment=True, can_write_post=True, can_upload=True,
         can_manage_category=True, can_manage_user=True,
         suspended_until=None, is_banned=False,
-        created_at=datetime(2026, 7, 23, tzinfo=timezone.utc),
+        created_at=datetime(2026, 7, 23, tzinfo=UTC),
     )
 
 
@@ -39,9 +42,11 @@ def _make_category(id=1, slug="dnd", name="TRPG"):
     return Category(id=id, slug=slug, name=name, display_order=0)
 
 
-def _make_post(id=1, title="테스트 글", contents="본문", user_id=1, nickname="tester", thumbnail_url=None):
+def _make_post(
+    id=1, title="테스트 글", contents="본문", user_id=1, nickname="tester", thumbnail_url=None
+):
     """테스트용 Post 객체 생성 헬퍼"""
-    now = datetime(2026, 7, 21, tzinfo=timezone.utc)
+    now = datetime(2026, 7, 21, tzinfo=UTC)
     post = Post(
         id=id,
         title=title,
@@ -182,6 +187,19 @@ def test_get_pages_search_and_pagination(client, mock_post_repo, mock_category_r
         user_id=None,
         include_deleted=False,
     )
+
+
+def test_get_pages_random_is_single_sample_page(client, mock_post_repo, mock_category_repo):
+    """무작위 정렬은 페이지가 겹치므로 한 페이지 표본만 준다."""
+    mock_post_repo.get_posts.return_value = ([], 27)
+
+    response = client.get("/pages?order=random&page=3&size=10")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["page"] == 1
+    assert data["total_pages"] == 1
+    assert data["total"] == 27
 
 
 @pytest.mark.parametrize(

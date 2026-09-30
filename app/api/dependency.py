@@ -44,9 +44,9 @@ async def get_current_user(
     try:
         claims = auth_service.decode_jwt_claims(access_token)
     except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="token expired")
+        raise HTTPException(status_code=401, detail="token expired") from None
     except jwt.PyJWTError:
-        raise HTTPException(status_code=401, detail="invalid token")
+        raise HTTPException(status_code=401, detail="invalid token") from None
 
     user = await user_repo.get_user_by_id(claims.user_id)
     if user is None:      # 토큰은 유효한데 계정이 사라진 경우

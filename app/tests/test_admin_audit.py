@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.database.orm import AdminAuditLog, User
 
@@ -21,7 +21,7 @@ def _make_user(user_id: int) -> User:
         can_manage_post=False,
         suspended_until=None,
         is_banned=False,
-        created_at=datetime(2026, 7, 30, tzinfo=timezone.utc),
+        created_at=datetime(2026, 7, 30, tzinfo=UTC),
     )
 
 
@@ -111,7 +111,7 @@ def test_admin_can_list_audit_logs(
         before_data={"is_banned": False},
         after_data={"is_banned": True},
         ip_address="127.0.0.1",
-        created_at=datetime(2026, 7, 30, tzinfo=timezone.utc),
+        created_at=datetime(2026, 7, 30, tzinfo=UTC),
     )
     mock_admin_audit_repo.get_logs.return_value = ([log], 1)
 

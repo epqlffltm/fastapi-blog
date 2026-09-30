@@ -5,18 +5,18 @@ Revises: 6bb0a2c289f1
 Create Date: 2026-07-30 10:00:00.000000
 
 """
-from typing import Sequence, Union
+from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
 
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "9a4c1e7b2f30"
-down_revision: Union[str, Sequence[str], None] = "6bb0a2c289f1"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = "6bb0a2c289f1"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 # 모델(orm.AdminAuditLog)과 같은 variant 를 쓴다.

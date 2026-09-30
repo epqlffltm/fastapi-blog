@@ -7,6 +7,9 @@
 2026-07-28
 실제 이미지 검증 / 픽셀 제한 / 비동기 파일 저장·삭제
 아바타 교체 시 애플리케이션이 관리하는 기존 파일 식별 지원
+
+2026-09-30
+업로드를 64KiB 조각으로 읽어 한도 초과 시 즉시 중단 (전체를 메모리에 올리지 않음)
 '''
 
 import asyncio
@@ -21,7 +24,6 @@ from fastapi import HTTPException, UploadFile
 from PIL import Image, UnidentifiedImageError
 
 from ..database.connection import settings
-
 
 # 확장자는 파일명이 아니라 이 표에서 정한다.
 # 파일명을 믿으면 ../../ 같은 경로 탈출이나 위장 확장자가 들어온다
@@ -42,6 +44,7 @@ PIL_FORMATS: dict[str, str] = {
 
 UPLOAD_DIR = Path(__file__).resolve().parent.parent.parent / "static" / "img"
 _MANAGED_FILENAME = re.compile(r"^[0-9a-f]{32}\.(?:jpg|png|gif|webp)$")
+READ_CHUNK_SIZE = 64 * 1024
 
 
 class UploadService:
@@ -52,12 +55,10 @@ class UploadService:
         if extension is None:
             raise HTTPException(status_code=415, detail="unsupported file type")
 
-        # 전부 읽어 크기를 재고 나서 쓴다.
-        # 스트리밍으로 쓰면서 검사하면 초과분이 이미 디스크에 남는다.
-        data = await file.read()
-        if len(data) > settings.upload_max_bytes:
-            limit_mb = settings.upload_max_bytes // (1024 * 1024)
-            raise HTTPException(status_code=413, detail=f"file too large (max {limit_mb}MB)")
+        # 조각 단위로 메모리에 모으며 크기를 잰다. 한도를 넘는 순간 중단하므로
+        # 거대한 업로드도 한도 + 한 조각 이상은 메모리에 올라오지 않는다.
+        # 디스크에는 검증을 모두 통과한 뒤에야 쓰므로 초과분이 남지 않는다.
+        data = await self._read_limited(file, settings.upload_max_bytes)
         if len(data) == 0:
             raise HTTPException(status_code=400, detail="empty file")
 
@@ -69,6 +70,19 @@ class UploadService:
         await asyncio.to_thread(self._write_file, target, data)
 
         return filename, len(data)
+
+    @staticmethod
+    async def _read_limited(file: UploadFile, max_bytes: int) -> bytes:
+        """최대 max_bytes 까지만 읽는다. 넘으면 즉시 413 을 던진다."""
+        buffer = bytearray()
+        while chunk := await file.read(READ_CHUNK_SIZE):
+            buffer.extend(chunk)
+            if len(buffer) > max_bytes:
+                limit_mb = max_bytes // (1024 * 1024)
+                raise HTTPException(
+                    status_code=413, detail=f"file too large (max {limit_mb}MB)"
+                )
+        return bytes(buffer)
 
     async def delete(self, filename: str) -> None:
         """DB 저장 실패나 이미지 교체 시 이미 저장된 파일을 안전하게 삭제한다."""

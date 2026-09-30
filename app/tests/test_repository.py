@@ -3,9 +3,13 @@
 """
 2026-07-28
 DB 쓰기 실패 rollback / 좋아요 중복 INSERT 처리 테스트
+
+2026-09-30
+이메일 조회 소문자 정규화 테스트
+무작위 정렬 OFFSET 미사용 테스트
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -31,7 +35,7 @@ def _make_user() -> User:
         can_manage_user=False,
         suspended_until=None,
         is_banned=False,
-        created_at=datetime(2026, 7, 28, tzinfo=timezone.utc),
+        created_at=datetime(2026, 7, 28, tzinfo=UTC),
     )
 
 
@@ -122,3 +126,40 @@ async def test_get_posts_uses_aggregate_query_and_searches_all_fields():
     assert "posts.contents" in sql
     assert "users.nickname" in sql
     assert "LIMIT 20 OFFSET 20" in sql
+
+@pytest.mark.asyncio
+async def test_get_user_by_email_normalizes_case():
+    session = _mock_session()
+    repository = UserRepository(session=session)
+
+    await repository.get_user_by_email(" Foo@X.com ")
+
+    statement = session.scalar.await_args.args[0]
+    compiled = statement.compile(
+        dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+    )
+    assert "'foo@x.com'" in str(compiled)
+
+
+@pytest.mark.asyncio
+async def test_get_posts_random_ignores_page_offset():
+    """무작위 정렬은 OFFSET 을 쓰지 않는다 (페이지 간 중복 방지)."""
+    session = _mock_session()
+    result = Mock()
+    result.all.return_value = []
+    session.execute.return_value = result
+    session.scalar.return_value = 0
+    repo = PostRepository(session=session)
+
+    await repo.get_posts(order="random", page=5, size=20)
+
+    statement = session.execute.await_args.args[0]
+    sql = str(
+        statement.compile(
+            dialect=postgresql.dialect(),
+            compile_kwargs={"literal_binds": True},
+        )
+    )
+    assert "random()" in sql
+    assert "LIMIT 20" in sql
+    assert "OFFSET 0" in sql or "OFFSET" not in sql

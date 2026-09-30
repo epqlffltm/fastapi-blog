@@ -20,17 +20,22 @@ async 전환 (await) / 저장 후 fresh 재조회로 새 댓글 즉시 반영
 
 2026-07-30
 댓글 작성 빈도 제한 (사용자 ID 기준)
+
+2026-09-30
+댓글 표시 규칙을 ORM 관계 대신 응답 스키마에 적용
 '''
 
+from datetime import UTC, datetime
+
 from fastapi import APIRouter, Depends, HTTPException
-from datetime import datetime, timezone
-from ..database.repository import PostRepository, CommentRepository
+
 from ..database.orm import Comment, User
+from ..database.repository import CommentRepository, PostRepository
 from ..schema.request import CommentCreate, CommentUpdate
 from ..schema.response import PostDetailSchema
-from ..service.comment import visible_comments
+from ..service.comment import build_post_detail
 from ..service.write_ratelimit import ContentWriteRateLimitService
-from .dependency import get_current_user, get_active_user, require_permission
+from .dependency import get_active_user, get_current_user, require_permission
 
 router = APIRouter(tags=["comment"])
 
@@ -73,8 +78,7 @@ async def create_comment_handler(
     # 새 댓글이 반영된 글을 다시 읽는다. fresh=True 로 세션 캐시를 무시해야
     # 방금 추가한 댓글까지 포함된 최신 comments 가 로드된다
     post = await post_repo.get_post_by_id(post_id, fresh=True)
-    post.comments = visible_comments(post.comments)
-    return post
+    return build_post_detail(post)
 
 
 @router.patch("/comment/{id}", status_code=200)#댓글 수정
@@ -92,7 +96,7 @@ async def update_comment_handler(
         raise HTTPException(status_code=403, detail="not your comment")
 
     comment.contents = request.contents
-    comment.updated_at = datetime.now(timezone.utc)
+    comment.updated_at = datetime.now(UTC)
     comment = await comment_repo.update(comment)
     return {"id": comment.id, "contents": comment.contents}
 
@@ -111,6 +115,6 @@ async def delete_comment_handler(
 
     # 소프트삭제. 답글이 달려 있으면 자리표시자로 남는다
     comment.is_deleted = True
-    comment.updated_at = datetime.now(timezone.utc)
+    comment.updated_at = datetime.now(UTC)
     await comment_repo.update(comment)
     return

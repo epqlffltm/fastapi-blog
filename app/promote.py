@@ -10,18 +10,23 @@
 
     uv run python -m app.promote hong@example.com           # 모든 권한
     uv run python -m app.promote hong@example.com revoke    # 댓글만 남김
+
+2026-09-30
+이메일을 소문자로 정규화해 조회
 '''
 
 import sys
+
 from sqlalchemy import select
+
 from .database.connection import SessionFactory
-from .database.orm import User, PERMISSIONS
+from .database.orm import PERMISSIONS, User
 
 
 def promote(email: str, revoke: bool) -> None:
     session = SessionFactory()
     try:
-        user = session.scalar(select(User).where(User.email == email))
+        user = session.scalar(select(User).where(User.email == email.strip().lower()))
         if user is None:
             print(f"그런 계정이 없습니다: {email}")
             return

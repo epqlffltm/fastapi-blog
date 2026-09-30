@@ -18,40 +18,65 @@ OTP 원자 검증·소비 / 비밀번호 변경 시 기존 세션 무효화
 
 2026-07-30
 관리 행위(권한·정지·강퇴)를 감사 로그와 한 트랜잭션으로 기록
+
+2026-09-30
+로그인 시도 제한을 검증 전 원자적 확인·증가로 변경
+정지·강퇴 회원의 프로필 수정(PATCH /me) 차단
 '''
 
 import logging
 from contextlib import suppress
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from fastapi import (
-    APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, UploadFile,
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
 )
 from sqlalchemy.exc import IntegrityError
+
 from ..database.audit_repository import AdminAuditRepository
 from ..database.connection import settings
 from ..database.orm import AdminAuditLog, User
 from ..database.profile_repository import ProfileCommentRepository
 from ..database.repository import UserRepository
 from ..schema.request import (
-    SignUpRequest, LogInRequest, VerifyOTPRequest,
-    ResetPasswordRequest, ResetPasswordVerifyRequest,
-    PermissionUpdateRequest, SuspendRequest, BanRequest,
-    ProfileUpdateRequest, PasswordChangeRequest,
+    BanRequest,
+    LogInRequest,
+    PasswordChangeRequest,
+    PermissionUpdateRequest,
+    ProfileUpdateRequest,
+    ResetPasswordRequest,
+    ResetPasswordVerifyRequest,
+    SignUpRequest,
+    SuspendRequest,
+    VerifyOTPRequest,
 )
 from ..schema.response import (
-    ListUserSchema, UserSchema, PublicUserSchema,
-    ListUserCommentSchema, UserCommentItemSchema, PostBriefSchema,
+    ListUserCommentSchema,
+    ListUserSchema,
+    PostBriefSchema,
+    PublicUserSchema,
+    UserCommentItemSchema,
+    UserSchema,
 )
 from ..service.auth import AuthService
 from ..service.client_ip import get_client_ip
-from ..service.upload import UploadService
 from ..service.email import EmailService
 from ..service.otp import OTPService, OTPVerifyResult
 from ..service.ratelimit import LoginRateLimitService
+from ..service.upload import UploadService
 from .dependency import (
-    get_current_user, get_active_user, require_permission,
-    get_current_user_optional, COOKIE_NAME,
+    COOKIE_NAME,
+    get_active_user,
+    get_current_user,
+    get_current_user_optional,
+    require_permission,
 )
 
 router = APIRouter(prefix="/user", tags=["user"])
@@ -116,7 +141,9 @@ async def log_in_handler(
 ):
     ip = get_client_ip(http_request)
 
-    if await rate_limit.is_blocked(request.email, ip):
+    # 확인과 증가를 한 번에 한다. 먼저 세어 두므로 실패 시 따로 기록할 필요가 없고,
+    # 동시에 몰린 요청도 한도만큼만 bcrypt 까지 간다
+    if not await rate_limit.acquire_attempt(request.email, ip):
         raise HTTPException(status_code=429, detail="too many login attempts")
 
     user = await user_repo.get_user_by_email(request.email)
@@ -124,13 +151,11 @@ async def log_in_handler(
         # 메시지를 통일해도 응답 시간이 가입 여부를 알려준다.
         # 계정이 없으면 bcrypt 를 건너뛰어 60배 가까이 빨라지므로 같은 비용을 치른다
         await auth_service.verify_dummy_password(request.password)
-        await rate_limit.record_failure(request.email, ip)
         raise HTTPException(status_code=401, detail="invalid email or password")
     if not await auth_service.verify_password_async(request.password, user.password):
-        await rate_limit.record_failure(request.email, ip)
         raise HTTPException(status_code=401, detail="invalid email or password")
 
-    await rate_limit.reset(request.email)
+    await rate_limit.reset(request.email, ip)
 
     response.set_cookie(
         key=COOKIE_NAME,
@@ -160,7 +185,8 @@ async def get_me_handler(
 @router.patch("/me", status_code=200, response_model=UserSchema)
 async def update_me_handler(
     request: ProfileUpdateRequest,
-    current_user: User = Depends(get_current_user),
+    # 닉네임·소개도 남에게 보이는 새 내용이므로 제재 중엔 막는다 (아바타와 같은 기준)
+    current_user: User = Depends(get_active_user),
     user_repo: UserRepository = Depends(),
 ):
     nickname_changed = (
@@ -398,7 +424,7 @@ async def suspend_handler(
     before_data = {"suspended_until": _isoformat_or_none(user.suspended_until)}
     user.suspended_until = (
         None if request.days == 0
-        else datetime.now(timezone.utc) + timedelta(days=request.days)
+        else datetime.now(UTC) + timedelta(days=request.days)
     )
     after_data = {"suspended_until": _isoformat_or_none(user.suspended_until)}
 

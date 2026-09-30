@@ -16,7 +16,7 @@ decode_jwt 래퍼 제거 (decode_jwt_claims 하나로 통일)
 
 import secrets
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import bcrypt
 import jwt
@@ -27,7 +27,6 @@ from .password import (
     is_bcrypt_password_length_valid,
     validate_bcrypt_password_length,
 )
-
 
 # 존재하지 않는 계정으로 로그인이 들어와도 bcrypt 를 똑같이 한 번 태우기 위한 해시.
 # 모듈 로드 시 한 번만 만든다 — 요청마다 만들면 그 자체가 비용이다.
@@ -102,7 +101,7 @@ class AuthService:
 
     def create_jwt(self, user_id: int, token_version: int = 0) -> str:
         """사용자와 현재 세션 버전을 담은 액세스 토큰을 발급한다."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         return jwt.encode(
             {
                 "sub": str(user_id),

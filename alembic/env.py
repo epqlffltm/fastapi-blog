@@ -2,16 +2,16 @@ import asyncio
 import os
 from logging.config import fileConfig
 
-from alembic import context
 from dotenv import load_dotenv
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
+
+from alembic import context
 
 # 앱의 Base와 모델을 가져온다.
 # orm을 import해야 모든 테이블이 Base.metadata에 등록된다.
 from app.database import orm  # noqa: F401
 from app.database.connection import Base
-
 
 load_dotenv()
 

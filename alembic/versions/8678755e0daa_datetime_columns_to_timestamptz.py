@@ -5,17 +5,18 @@ Revises: 7ae6a4220e8c
 Create Date: 2026-07-27 22:05:13.202947
 
 """
-from typing import Sequence, Union
+from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
+from alembic import op
+
 # revision identifiers, used by Alembic.
 revision: str = '8678755e0daa'
-down_revision: Union[str, Sequence[str], None] = '7ae6a4220e8c'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = '7ae6a4220e8c'
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 # 기존 값은 전부 UTC 로 저장돼 있었다(naive). timestamptz 로 바꿀 때

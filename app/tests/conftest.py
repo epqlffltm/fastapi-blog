@@ -17,9 +17,13 @@ OTP Lua 스크립트 동작을 반영한 Redis mock 추가
 
 2026-07-30
 감사 로그 저장소 / 글·댓글 레이트리밋 fixture 추가
+
+2026-09-30
+로그인 시도 원자 카운터 Lua 스크립트를 Redis mock 에 반영
+단위 테스트는 항상 Redis mock 사용 (autouse, 실제 Redis 카운터 누적 방지)
 '''
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import DEFAULT, AsyncMock, Mock
 
 import pytest
@@ -27,6 +31,7 @@ from fastapi.testclient import TestClient
 from redis.asyncio import Redis
 
 from app.api.dependency import get_current_user, get_current_user_optional
+from app.database import cache as cache_module
 from app.database.audit_repository import AdminAuditRepository
 from app.database.cache import get_redis_client
 from app.database.orm import User
@@ -42,11 +47,11 @@ from app.database.repository import (
 from app.main import app
 from app.service.email import EmailService
 from app.service.ratelimit import LoginRateLimitService
+from app.service.upload import UploadService
 from app.service.write_ratelimit import (
     ContentWriteRateLimitService,
     RateLimitDecision,
 )
-from app.service.upload import UploadService
 
 
 @pytest.fixture
@@ -72,7 +77,7 @@ def current_user():
         can_manage_post=False,
         suspended_until=None,
         is_banned=False,
-        created_at=datetime(2026, 7, 23, tzinfo=timezone.utc),
+        created_at=datetime(2026, 7, 23, tzinfo=UTC),
     )
 
 
@@ -107,7 +112,7 @@ def unverified_client(client, current_user):
 def suspended_client(client, current_user):
     """기간 정지된 회원 (권한은 있지만 제재에서 걸린다)"""
     current_user.grant_all()
-    current_user.suspended_until = datetime.now(timezone.utc) + timedelta(days=1)
+    current_user.suspended_until = datetime.now(UTC) + timedelta(days=1)
     app.dependency_overrides[get_current_user] = lambda: current_user
     yield client
     app.dependency_overrides.clear()
@@ -207,6 +212,10 @@ def mock_redis():
     redis.aclose = AsyncMock()
 
     eval_mock = AsyncMock()
+    # 로그인 시도 카운터. 아래 side_effect 는 await 없이 읽고-쓰므로
+    # 이벤트 루프 안에서 끼어들 틈이 없다 = Lua 스크립트의 원자성과 같다
+    counters: dict[str, int] = {}
+    redis.counters = counters
 
     async def eval_side_effect(script, _num_keys, *args):
         # 개별 테스트가 return_value를 지정하면 그 값을 최우선으로 쓴다.
@@ -231,6 +240,30 @@ def mock_redis():
                 return 1
             return 0
 
+        if "LOGIN_ATTEMPT_ACQUIRE" in script:
+            email_key, ip_key, max_email, max_ip, _window = args
+            if (
+                counters.get(email_key, 0) >= int(max_email)
+                or counters.get(ip_key, 0) >= int(max_ip)
+            ):
+                return 0
+            counters[email_key] = counters.get(email_key, 0) + 1
+            counters[ip_key] = counters.get(ip_key, 0) + 1
+            return 1
+
+        if "LOGIN_ATTEMPT_RESET" in script:
+            email_key, ip_key = args
+            counters.pop(email_key, None)
+            if counters.get(ip_key, 0) > 0:
+                counters[ip_key] -= 1
+            return 1
+
+        if "CONTENT_WRITE_RATE_LIMIT" in script:
+            key, window, max_requests = args
+            counters[key] = counters.get(key, 0) + 1
+            allowed = 1 if counters[key] <= int(max_requests) else 0
+            return [allowed, int(window)]
+
         # OTP 발급 슬롯 등 성공이 기본인 스크립트.
         return 1
 
@@ -242,11 +275,27 @@ def mock_redis():
     app.dependency_overrides.clear()
 
 
+@pytest.fixture(autouse=True)
+def _isolate_unit_tests_from_real_redis(request, monkeypatch):
+    """통합 테스트가 아니면 어떤 경로로도 실제 Redis 에 닿지 않게 한다.
+
+    의존성 주입(get_redis_client)은 mock_redis 로 덮고, 모듈 전역 클라이언트도
+    같은 mock 으로 바꾼다. 실제 Redis 가 떠 있으면 카운터가 실행마다 쌓여
+    429 로 깨지던 문제를 막는다.
+    """
+    if request.node.get_closest_marker("integration") is not None:
+        yield
+        return
+    redis = request.getfixturevalue("mock_redis")
+    monkeypatch.setattr(cache_module, "redis_client", redis)
+    yield
+
+
 @pytest.fixture
 def mock_rate_limit():
     """로그인 레이트리밋 — 기본은 통과. 막히는 경우는 테스트가 직접 켠다"""
     service = AsyncMock(spec=LoginRateLimitService)
-    service.is_blocked.return_value = False
+    service.acquire_attempt.return_value = True
     app.dependency_overrides[LoginRateLimitService] = lambda: service
     yield service
     app.dependency_overrides.clear()

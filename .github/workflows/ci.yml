@@ -61,13 +61,15 @@ jobs:
         run: uv python install 3.13
 
       - name: Sync locked dependencies
-        run: uv sync --frozen --all-groups
+        # 테스트 도구(pytest 등)는 dev 그룹에 있다. 운영 이미지는 --no-dev 로 제외한다
+        run: uv sync --frozen --group dev
 
       - name: Python syntax check
         run: uv run python -m compileall -q app alembic
 
-      - name: Ruff correctness check
-        run: uvx ruff check --select E9,F63,F7,F82,F401 app alembic
+      - name: Ruff lint
+        # 규칙은 pyproject.toml 의 [tool.ruff.lint] 를 따른다 (E,F,I,UP,B)
+        run: uvx ruff check app alembic
 
       - name: Migration round-trip
         run: |

@@ -13,11 +13,12 @@
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.exc import IntegrityError
+
 from ..database.orm import Category, User
 from ..database.repository import CategoryRepository
 from ..schema.request import CategoryCreate, CategoryUpdate
 from ..schema.response import CategoryListItemSchema, CategorySchema, ListCategorySchema
-from .dependency import require_permission, get_current_user_optional
+from .dependency import get_current_user_optional, require_permission
 
 router = APIRouter(tags=["category"])
 

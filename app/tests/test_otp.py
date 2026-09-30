@@ -10,9 +10,10 @@ OTP API 테스트
 '''
 
 from unittest.mock import Mock
-from redis.asyncio import Redis
-from app.service.otp import OTPService
 
+from redis.asyncio import Redis
+
+from app.service.otp import OTPService
 
 # ---------- 발급 ----------
 

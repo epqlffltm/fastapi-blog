@@ -5,7 +5,8 @@
 비밀번호 재설정 API 테스트
 '''
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
 from app.database.orm import User
 from app.service.auth import AuthService
 
@@ -17,7 +18,7 @@ def _make_user(id=1, email="test@example.com", nickname="tester"):
         password="$2b$12$fakehashedpassword",
         nickname=nickname,
         is_verified=True,
-        created_at=datetime(2026, 7, 24, tzinfo=timezone.utc),
+        created_at=datetime(2026, 7, 24, tzinfo=UTC),
     )
 
 

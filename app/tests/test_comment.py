@@ -14,13 +14,17 @@
 
 2026-07-28
 댓글 생성·수정 입력 검증
+
+2026-09-30
+상세 응답이 ORM 댓글 관계를 바꾸지 않는지 테스트
 '''
 
-from datetime import datetime, timedelta, timezone
-from app.database.orm import Post, Comment, User, Category
+from datetime import UTC, datetime, timedelta
+
+from app.database.orm import Category, Comment, Post, User
 from app.service.comment import visible_comments
 
-BASE = datetime(2026, 7, 21, tzinfo=timezone.utc)
+BASE = datetime(2026, 7, 21, tzinfo=UTC)
 
 
 def _make_user(id=1, nickname="tester"):
@@ -30,7 +34,7 @@ def _make_user(id=1, nickname="tester"):
         can_comment=True, can_write_post=False, can_upload=False,
         can_manage_category=False, can_manage_user=False,
         suspended_until=None, is_banned=False,
-        created_at=datetime(2026, 7, 23, tzinfo=timezone.utc),
+        created_at=datetime(2026, 7, 23, tzinfo=UTC),
     )
 
 
@@ -408,3 +412,21 @@ def test_deleted_comment_hides_contents(client, mock_post_repo, mock_redis, mock
     assert comments[0]["user"] is None
     assert "지워진 내용" not in response.text
     assert comments[1]["contents"] == "답글"      # 답글은 그대로 보인다
+
+def test_post_detail_does_not_mutate_orm_comments(
+    client, mock_post_repo, mock_redis, mock_like_repo
+):
+    """표시 규칙은 응답에만 적용한다. 세션이 추적하는 관계 컬렉션을 바꾸면
+    빠진 댓글의 post_id 가 flush 때 NULL 이 될 수 있다."""
+    post = _make_post()
+    deleted_reply = _make_comment(id=2, parent_id=1, is_deleted=True, minutes=1)
+    original = [_make_comment(id=1), deleted_reply]
+    post.comments = list(original)
+    mock_post_repo.get_post_by_id.return_value = post
+    mock_redis.set.return_value = False
+
+    response = client.get("/page/1")
+
+    assert response.status_code == 200
+    assert [c["id"] for c in response.json()["comments"]] == [1]
+    assert post.comments == original       # ORM 쪽은 그대로

@@ -36,18 +36,26 @@ LikeRepository (좋아요 추가/삭제/카운트/존재확인)
 2026-07-29
 유저별 댓글 조회는 ProfileCommentRepository 로 이관.
 여기 있던 판본은 글의 삭제 여부를 보지 않아 삭제된 글의 댓글이 새어나갔다
+
+2026-09-30
+이메일 조회 시 소문자 정규화
+무작위 정렬은 페이지를 무시하고 표본 한 페이지만 반환 (페이지 간 중복 방지)
+불리언 비교를 .is_(False) 로 통일
 '''
 
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import Depends
-from sqlalchemy import select, func, or_, update as sa_update, delete as sa_delete
+from sqlalchemy import delete as sa_delete
+from sqlalchemy import func, or_, select
+from sqlalchemy import update as sa_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import noload
+
 from .connection import get_db
-from .orm import Post, Comment, Upload, User, Category, Like
+from .orm import Category, Comment, Like, Post, Upload, User
 
 
 @asynccontextmanager
@@ -149,6 +157,9 @@ class PostRepository:
             stmt = stmt.order_by(Post.created_at.asc(), Post.id.asc())
         elif order == "random":
             stmt = stmt.order_by(func.random())
+            # 무작위 정렬은 요청마다 순서가 새로 섞이므로 OFFSET 으로 자르면
+            # 페이지끼리 글이 겹치거나 빠진다. 무작위는 '표본 size 개' 로만 제공한다
+            page = 1
         else:
             stmt = stmt.order_by(Post.created_at.desc(), Post.id.desc())
 
@@ -166,7 +177,7 @@ class PostRepository:
     ) -> Post | None:
         stmt = select(Post).where(Post.id == id)
         if not include_deleted:
-            stmt = stmt.where(Post.is_deleted == False)
+            stmt = stmt.where(Post.is_deleted.is_(False))
         if fresh:
             # 세션 캐시(identity map)를 무시하고 DB 에서 다시 읽는다.
             # 댓글을 방금 저장한 뒤처럼, 관계(comments)를 최신으로 다시 로드해야 할 때
@@ -204,7 +215,7 @@ class CommentRepository:
 
     async def get_comment_by_id(self, id: int) -> Comment | None:
         return await self.session.scalar(
-            select(Comment).where(Comment.id == id).where(Comment.is_deleted == False)
+            select(Comment).where(Comment.id == id).where(Comment.is_deleted.is_(False))
         )
 
     async def save(self, comment: Comment) -> Comment:
@@ -230,7 +241,11 @@ class UserRepository:
         return list(result.all())
 
     async def get_user_by_email(self, email: str) -> User | None:
-        return await self.session.scalar(select(User).where(User.email == email))
+        # 저장은 요청 스키마에서 소문자로 정규화된다. 다른 경로(스크립트 등)로 들어와도
+        # 같은 표준형으로 찾도록 여기서도 한 번 더 맞춘다
+        return await self.session.scalar(
+            select(User).where(User.email == email.strip().lower())
+        )
 
     async def get_user_by_nickname(self, nickname: str) -> User | None:
         return await self.session.scalar(select(User).where(User.nickname == nickname))
@@ -262,7 +277,7 @@ class CategoryRepository:
             select(Category, func.count(Post.id))
             .outerjoin(
                 Post,
-                (Post.category_id == Category.id) & (Post.is_deleted == False),
+                (Post.category_id == Category.id) & (Post.is_deleted.is_(False)),
             )
             .group_by(Category.id)
             .order_by(Category.display_order, Category.id)
@@ -341,7 +356,7 @@ class LikeRepository:
             .values(
                 user_id=user_id,
                 post_id=post_id,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
             .on_conflict_do_nothing(constraint="uq_likes_user_post")
         )

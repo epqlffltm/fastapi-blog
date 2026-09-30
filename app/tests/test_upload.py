@@ -6,6 +6,9 @@
 
 2026-07-28
 실제 이미지 검증 / 크기 제한 / DB 실패 시 파일 정리 테스트
+
+2026-09-30
+조각 읽기 중 한도 초과 시 조기 중단 · 잔여 파일 없음 테스트
 '''
 
 from io import BytesIO
@@ -168,6 +171,55 @@ async def test_upload_service_rejects_large_dimensions(monkeypatch):
 
     assert exc_info.value.status_code == 413
     assert exc_info.value.detail == "image dimensions too large"
+
+
+class _CountingFile(BytesIO):
+    """read() 가 몇 바이트를 넘겨줬는지 센다."""
+
+    def __init__(self, data: bytes):
+        super().__init__(data)
+        self.bytes_read = 0
+
+    def read(self, size: int = -1) -> bytes:
+        chunk = super().read(size)
+        self.bytes_read += len(chunk)
+        return chunk
+
+
+@pytest.mark.asyncio
+async def test_upload_service_rejects_oversize_early_without_leftovers(tmp_path, monkeypatch):
+    """한도를 넘는 순간 읽기를 멈추고, 디스크에는 아무것도 남기지 않는다."""
+    monkeypatch.setattr(upload_module, "UPLOAD_DIR", tmp_path)
+    monkeypatch.setattr(settings, "upload_max_bytes", 100 * 1024)
+    source = _CountingFile(b"\0" * (10 * 1024 * 1024))
+    upload = UploadFile(
+        file=source,
+        filename="huge.png",
+        headers=Headers({"content-type": "image/png"}),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await UploadService().save(upload)
+
+    assert exc_info.value.status_code == 413
+    assert exc_info.value.detail.startswith("file too large")
+    # 10MB 전부가 아니라 한도 + 한 조각까지만 읽었다
+    assert source.bytes_read <= 100 * 1024 + upload_module.READ_CHUNK_SIZE
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_upload_service_accepts_file_exactly_at_limit(tmp_path, monkeypatch):
+    monkeypatch.setattr(upload_module, "UPLOAD_DIR", tmp_path)
+    data = _image_bytes(size=(300, 300))
+    monkeypatch.setattr(settings, "upload_max_bytes", len(data))
+
+    filename, size = await UploadService().save(
+        _upload_file(data, "image/png", "exact.png")
+    )
+
+    assert size == len(data)
+    assert [p.name for p in tmp_path.iterdir()] == [filename]
 
 
 @pytest.mark.asyncio

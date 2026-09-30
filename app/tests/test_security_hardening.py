@@ -1,6 +1,6 @@
 """인증·설정·Redis 장애 격리 회귀 테스트."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import Mock
 
 import jwt
@@ -35,12 +35,12 @@ def _make_user() -> User:
         can_manage_post=True,
         suspended_until=None,
         is_banned=False,
-        created_at=datetime(2026, 7, 23, tzinfo=timezone.utc),
+        created_at=datetime(2026, 7, 23, tzinfo=UTC),
     )
 
 
 def _make_post() -> Post:
-    now = datetime(2026, 7, 21, tzinfo=timezone.utc)
+    now = datetime(2026, 7, 21, tzinfo=UTC)
     post = Post(
         id=1,
         title="테스트 글",
@@ -204,7 +204,8 @@ def test_login_overlong_password_returns_generic_401(
 
     assert response.status_code == 401
     assert response.json()["detail"] == "invalid email or password"
-    mock_rate_limit.record_failure.assert_awaited_once()
+    mock_rate_limit.acquire_attempt.assert_awaited_once()
+    mock_rate_limit.reset.assert_not_awaited()
 
 
 def test_sign_up_overlong_password_returns_422(client, mock_user_repo):
@@ -422,7 +423,7 @@ def test_legacy_token_without_version_is_version_zero():
     token = jwt.encode(
         {
             "sub": "1",
-            "exp": datetime.now(timezone.utc) + timedelta(minutes=1),
+            "exp": datetime.now(UTC) + timedelta(minutes=1),
         },
         AuthService.secret_key,
         algorithm=AuthService.jwt_algorithm,
